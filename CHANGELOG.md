@@ -10,7 +10,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
-_Noch keine Änderungen._
+### Added
+- **P1 — Data-Plane-Image (`image/`):** generisches, self-contained
+  FreeRADIUS-3.2-Image auf Ubuntu 24.04, das die Domäne als Samba-AD-**Member**
+  joint (winbind) und PEAP-MSCHAPv2 gegen das AD prüft.
+  - `Dockerfile` (freeradius + winbind + krb5, Build-Assertions, `tini` als PID 1,
+    Healthcheck, read-only-rootfs-tauglich);
+  - `entrypoint.sh`: assembliert den raddb-Config-Tree auf tmpfs, rendert
+    `smb.conf`/`krb5.conf` + FreeRADIUS-mods/-sites aus Templates über eine
+    `envsubst`-Allow-List, joint als Member (nur wenn nötig), startet winbindd +
+    radiusd unter einem Supervisor;
+  - Templates `mods/{eap,ldap,mschap}` (PEAP, LDAP-Gruppen-Lookup, `ntlm_auth`),
+    `sites/{default,inner-tunnel}` (`Called-Station-SSID`-Branching, Per-SSID-Gate),
+    `smb.conf`, `krb5.conf`, `instance.d/{ssid-policy,clients.conf.example}`;
+  - `healthcheck.sh`: „up **und** enforcing" via `wbinfo -t` (AD-Trust) + `radclient`
+    Status-Server-Probe.
+  - Gegen die offiziellen FreeRADIUS-/Samba-Docs verifiziert (`$INCLUDE`-Auflösung,
+    `confdir`/`raddbdir`, `winbindd_privileged`-Pfad, `ntlm_auth --configfile`).
+    **Runtime-Verifikation (Join + PEAP-Flow) folgt im crabbox-E2E in P6.**
 
 ## [0.1.0] - 2026-07-10
 

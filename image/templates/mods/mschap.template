@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#
+# linuxmuster-radius -- MS-CHAP module (mods-enabled/mschap), rendered per
+# instance by the entrypoint via envsubst.
+#
+# HOW IT WIRES: the PEAP inner method (EAP-MSCHAPv2, sites/inner-tunnel) calls
+# this module to verify the client's NT-response. Active Directory never
+# releases the NT-hash over LDAP, so MSCHAPv2 MUST be checked BY the domain:
+#   mschap -> ntlm_auth -> winbindd -> AD DC.
+# Group-based AUTHORIZATION (per-SSID role) is done separately by rlm_ldap in
+# sites/inner-tunnel, because ntlm_auth's --require-membership-of checks exactly
+# ONE group. That one group is the BASE WLAN gate (Sophomorix 'wifi').
+#
+# envsubst allow-list (entrypoint): ${SMB_CONF} ${WORKGROUP} ${WIFI_GROUP}
+# --configfile=${SMB_CONF} pins ntlm_auth to the SAME rendered smb.conf that winbindd
+# uses, so its winbind socket / state-directory paths always match (single source of
+# truth). The %{mschap:...} tokens are FreeRADIUS expansions and pass through unchanged.
+#
+mschap {
+	#  Validate MS-CHAPv2 against AD via winbind.
+	#
+	#  --domain=${WORKGROUP} together with smb.conf "winbind use default domain
+	#    = yes" lets a bare sAMAccountName authenticate; %{mschap:User-Name}
+	#    strips any DOMAIN\ prefix or @realm suffix the supplicant sent.
+	#  --require-membership-of=${WORKGROUP}\\${WIFI_GROUP} is the BASE 'wifi'
+	#    gate: every MSCHAP auth must be a member of that group or ntlm_auth
+	#    fails -> Access-Reject. The '\\' is one literal backslash after the
+	#    config parser unescapes it, so ntlm_auth receives DOMAIN\group.
+	#  The Challenge / NT-Response fall back to "00" so a malformed packet
+	#    produces a clean auth failure instead of a module error.
+	#
+	#  NOTE (honest limit, cannot be fixed from a member server): the DC's
+	#  smb.conf must carry "ntlm auth = mschapv2-and-ntlmv2-only", or the DC
+	#  refuses the MSCHAPv2 exchange. Package updates on the DC sometimes drop
+	#  that line -> monitor it.
+	ntlm_auth = "/usr/bin/ntlm_auth --configfile=${SMB_CONF} --request-nt-key --allow-mschapv2 --domain=${WORKGROUP} --username=%{mschap:User-Name} --challenge=%{%{mschap:Challenge}:-00} --nt-response=%{%{mschap:NT-Response}:-00} --require-membership-of=${WORKGROUP}\\${WIFI_GROUP}"
+
+	#  ntlm_auth blocks the worker while winbind talks to the DC; cap the wait so
+	#  a sick domain fails fast instead of pinning threads (range 1..10s).
+	ntlm_auth_timeout = 10
+}

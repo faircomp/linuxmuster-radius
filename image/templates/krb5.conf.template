@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# ============================================================
+# linuxmuster-radius — Kerberos client config (krb5.conf)
+# Rendered per instance by entrypoint.sh via envsubst and exported as
+# KRB5_CONFIG=/run/lmnradius/krb5.conf, so that /etc can stay read-only.
+#
+# Substituted variables (envsubst allow-list):
+#   ${REALM}       UPPERCASE AD Kerberos realm       (e.g. LINUXMUSTER.SCHULE.DE)
+#   ${DNS_DOMAIN}  its lowercase DNS form, derived by the entrypoint as
+#                  `printf %s "$REALM" | tr '[:upper:]' '[:lower:]'`
+#
+# Verified against:
+#   https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html
+#   https://wiki.samba.org/index.php/Setting_up_Samba_as_a_Domain_Member
+# ============================================================
+
+[libdefaults]
+    default_realm = ${REALM}
+
+    # Locate the KDCs via AD's _kerberos._tcp/_udp SRV records instead of
+    # hardcoding a DC hostname (survives DC failover, matches the SambaWiki member
+    # example). dns_lookup_realm stays false: the realm is pinned above and mapped
+    # explicitly in [domain_realm] below, so no DNS TXT lookup is needed.
+    dns_lookup_kdc = true
+    dns_lookup_realm = false
+
+    # SPN-canonicalization pitfalls (verified while building linuxmuster-squid):
+    # the service principal must be built from the LITERAL hostname, never from a
+    # reverse-DNS (rdns) or forward-canonicalized name -- otherwise the SPN will
+    # not match the keytab/secret and Kerberos fails with SASL/"server not found"
+    # errors. This relies on the container hostname being SERVER_FQDN and its
+    # forward DNS resolving inside the container (both set by the control plane).
+    rdns = false
+    dns_canonicalize_hostname = false
+
+[realms]
+    # No kdc/admin_server lines on purpose: they are discovered via SRV
+    # (dns_lookup_kdc = true). default_domain maps short host names to this realm.
+    ${REALM} = {
+        default_domain = ${DNS_DOMAIN}
+    }
+
+[domain_realm]
+    # Map the AD DNS domain (and every host under it) to the realm.
+    .${DNS_DOMAIN} = ${REALM}
+    ${DNS_DOMAIN} = ${REALM}

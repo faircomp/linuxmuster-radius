@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#
+# linuxmuster-radius -- clients.conf EXAMPLE (documentation only, NOT loaded).
+#
+# The P2 control plane GENERATES the real ${confdir}/instance.d/clients.conf
+# (one client{} per --client-subnet, each with the instance's RADIUS shared
+# secret) and mounts it read-only; the entrypoint $INCLUDEs it. This .example
+# only documents the exact shape to emit -- it is never included by radiusd.
+#
+# WHY SUBNETS, NOT THE CONTROLLER IP: with UniFi the ACCESS POINTS are the NAS.
+# Each AP sends its Access-Requests from its OWN management IP (the controller
+# is not a proxy), so clients are the AP MANAGEMENT SUBNET(s) as CIDR. Multiple
+# subnets are supported -- emit one client{} per subnet. Defining only the
+# controller IP yields "unknown client" for every real request.
+#
+
+# --- One client{} per AP-management subnet (repeat for each --client-subnet) ---
+client ap-subnet-1 {
+	#  ipaddr accepts CIDR notation: this single block matches every AP in
+	#  10.0.0.0/16. Use ipv4addr/ipv6addr to restrict the family if needed.
+	ipaddr = 10.0.0.0/16
+
+	#  Shared secret between the APs and this RADIUS server. The control plane
+	#  generates a strong random secret per instance (>= 16, ideally 32 chars).
+	#  NEVER commit a real secret; this placeholder is illustrative only.
+	secret = CHANGE_ME_PER_INSTANCE_SECRET
+
+	#  Classic RADIUS over UDP (RadSec/TCP is deferred in this project).
+	proto = udp
+
+	#  Harden against BlastRADIUS (RFC 3579/5080): every 802.1X Access-Request
+	#  carries Message-Authenticator, so requiring it is safe for EAP APs.
+	require_message_authenticator = yes
+
+	shortname = ap-subnet-1
+}
+
+# client ap-subnet-2 {
+#	ipaddr = 10.1.0.0/16
+#	secret = CHANGE_ME_PER_INSTANCE_SECRET
+#	proto  = udp
+#	require_message_authenticator = yes
+#	shortname = ap-subnet-2
+# }
+
+# --- Loopback client for the container HEALTHCHECK (Status-Server probe) ---
+#  healthcheck.sh runs a radclient Status-Server probe against 127.0.0.1:1812;
+#  radiusd answers it because radiusd.conf ships 'status_server = yes'. A reply
+#  proves radiusd is LISTENING -- paired with 'wbinfo -t' (which proves the AD
+#  trust is healthy), that is the full "up AND enforcing" healthcheck.
+client healthcheck-loopback {
+	ipaddr = 127.0.0.1
+	secret = CHANGE_ME_LOOPBACK_SECRET
+	proto  = udp
+	shortname = healthcheck
+	#  'auto': require Message-Authenticator once the client has proven it can
+	#  send it. Keeps the probe working if radclient's Status-Server packet
+	#  omits it, without weakening the AP clients above.
+	require_message_authenticator = auto
+}

@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#
+# linuxmuster-radius -- EAP module (mods-enabled/eap), rendered per instance by
+# the entrypoint via envsubst.
+#
+# HOW THE PIECES WIRE TOGETHER (PEAP-MSCHAPv2)
+#   sites/default (outer)  --Auth-Type EAP-->  this module
+#     1. builds the OUTER TLS tunnel and presents the EAP server certificate
+#        (${EAP_CERT}, signed by the dedicated EAP-CA ${EAP_CA}). The client
+#        MUST pin that CA + the server name -- that pinning is LOAD-BEARING,
+#        because PEAP's inner MSCHAPv2 is cryptographically weak on its own.
+#     2. inside the tunnel the inner EAP type is MSCHAPv2, dispatched to the
+#        "inner-tunnel" virtual server (sites/inner-tunnel), which runs
+#        mschap -> ntlm_auth -> winbind (the AD DC validates the NT-hash) and
+#        then the per-SSID group gate.
+#   copy_request_to_tunnel = yes  copies the OUTER request attributes -- notably
+#        &Called-Station-SSID, created by rewrite_called_station_id in the outer
+#        authorize -- INTO the inner request, so the SSID gate can branch on it.
+#   use_tunneled_reply   = yes  copies the INNER reply (e.g. the Tunnel-* VLAN
+#        attributes set by the SSID gate) back onto the OUTER Access-Accept.
+#
+# envsubst allow-list (entrypoint): ${EAP_CERT} ${EAP_KEY} ${EAP_CA}
+# Everything else here (${certdir}, ${max_requests}, %{...}) is a FreeRADIUS
+# token, is NOT in the allow-list, and passes through unchanged.
+#
+eap {
+	#  PEAP is the default for this deployment: WPA2/WPA3-Enterprise with the
+	#  native Windows / Apple / Android supplicants.
+	default_eap_type = peap
+
+	timer_expire = 60
+	ignore_unknown_eap_types = no
+	cisco_accounting_username_bug = no
+	max_sessions = ${max_requests}
+
+	#  TLS parameters for the outer PEAP tunnel. All three PEM paths come from
+	#  the dedicated EAP-CA and are mounted read-only (the key is copied to
+	#  tmpfs, chmod-before-chown to the freerad user, by the entrypoint).
+	tls-config tls-common {
+		#  The EAP server key is issued WITHOUT a passphrase: unattended startup
+		#  cannot prompt for one. If you ever ship an encrypted key, add here:
+		#    private_key_password = <pw>
+		private_key_file = ${EAP_KEY}
+		certificate_file = ${EAP_CERT}
+
+		#  The single EAP-CA that signed the server cert. For PEAP we do NOT ask
+		#  the client for a certificate, so this is only the chain's trust anchor.
+		ca_file = ${EAP_CA}
+
+		cipher_list = "DEFAULT"
+		cipher_server_preference = yes
+
+		#  Pin TLS 1.2 (the stock raddb default). TLS 1.3 inside PEAP is still
+		#  patchy across supplicants; 1.2 is the interoperable, secure choice.
+		tls_min_version = "1.2"
+		tls_max_version = "1.2"
+
+		#  No on-disk TLS session cache: keeps the rootfs read-only and needs no
+		#  writable state dir. PEAP full handshakes are cheap at school scale.
+		cache {
+			enable = no
+		}
+	}
+
+	#  PEAP: outer tunnel uses tls-common; the inner method is EAP-MSCHAPv2,
+	#  handled by the inner-tunnel virtual server.
+	peap {
+		tls = tls-common
+		default_eap_type = mschapv2
+		copy_request_to_tunnel = yes
+		use_tunneled_reply = yes
+		virtual_server = "inner-tunnel"
+	}
+
+	#  Inner EAP-MSCHAPv2 method (invoked inside the PEAP tunnel; it calls the
+	#  mschap module during authenticate, which is where ntlm_auth runs).
+	mschapv2 {
+	}
+}

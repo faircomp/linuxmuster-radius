@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#
+# linuxmuster-radius -- LDAP module (mods-enabled/ldap), rendered per instance
+# by the entrypoint via envsubst.
+#
+# HOW IT WIRES: rlm_ldap does AUTHORIZATION only -- it locates the user object
+# (sites/inner-tunnel authorize) and answers the per-SSID group check
+# '&LDAP-Group == "<cn>"' (sites/inner-tunnel post-auth). It NEVER does the
+# MSCHAPv2 auth itself: AD won't hand out the NT-hash, so authentication goes
+# through winbind (see mods/mschap). Bind = the existing Sophomorix
+# 'global-binduser' -- never an admin account.
+#
+# envsubst allow-list (entrypoint):
+#   ${LDAP_SERVER} ${LDAP_BIND_DN} ${LDAP_BIND_PW} ${LDAP_BASE_DN}
+# ${LDAP_BIND_PW} is injected by the entrypoint from the mounted secret file
+# $LDAP_BIND_SECRET (one line); the value is only ever written into this
+# rendered config on tmpfs, and is NEVER echoed or logged.
+# The ${..base_dn} and ${thread[pool].*} tokens are FreeRADIUS references and
+# pass through envsubst unchanged.
+#
+ldap {
+	server = '${LDAP_SERVER}'
+	identity = '${LDAP_BIND_DN}'
+	password = '${LDAP_BIND_PW}'
+	base_dn = '${LDAP_BASE_DN}'
+
+	#  User object identification.
+	user {
+		base_dn = "${..base_dn}"
+		#  Active Directory keys users on sAMAccountName (NOT uid). Strip any
+		#  realm/domain qualifier first via Stripped-User-Name.
+		filter = "(sAMAccountName=%{%{Stripped-User-Name}:-%{User-Name}})"
+	}
+
+	#  User membership checking -- drives '&LDAP-Group == "<group-cn>"'.
+	group {
+		base_dn = "${..base_dn}"
+		#  AD group objects use objectClass "group" (not posixGroup).
+		filter = '(objectClass=group)'
+		#  memberOf on the user object lists the groups the user belongs to.
+		membership_attribute = 'memberOf'
+		#  Resolve the DNs in memberOf to their CN, so the per-SSID gate can
+		#  compare against short Sophomorix group names (e.g. "school-teachers").
+		name_attribute = cn
+	}
+
+	tls {
+		#  ${LDAP_SERVER} is ldaps://dc.fqdn, so the whole connection is TLS.
+		#
+		#  HONEST LIMIT (P1): a Samba AD DC presents a certificate from its own
+		#  (or the linuxmuster) CA, which is NOT in the container's system trust
+		#  store, so strict validation fails unless that CA is mounted. On the
+		#  trusted RADIUS<->DC link we therefore default to 'allow' (connect even
+		#  if the DC cert can't be verified). To HARDEN, mount the DC CA and set:
+		#    ca_file      = /run/lmnradius/dc-ca.pem
+		#    require_cert = 'demand'
+		require_cert = 'allow'
+		tls_min_version = "1.2"
+	}
+
+	#  Connection pool. The ${thread[pool].*} values come from radiusd.conf.
+	pool {
+		start = ${thread[pool].start_servers}
+		min = ${thread[pool].min_spare_servers}
+		max = ${thread[pool].max_servers}
+		spare = ${thread[pool].max_spare_servers}
+		uses = 0
+		retry_delay = 30
+		lifetime = 0
+		idle_timeout = 60
+	}
+}

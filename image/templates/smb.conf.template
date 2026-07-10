@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# ============================================================
+# linuxmuster-radius — Samba AD member smb.conf
+# Rendered per instance by entrypoint.sh via envsubst (${REALM}, ${WORKGROUP})
+# into the tmpfs run dir and pointed at with `-s` / the samba env, so that /etc
+# can stay read-only.
+#
+# This host is a DOMAIN MEMBER, not a DC: winbind is here ONLY to resolve the
+# NT-hash for PEAP-MSCHAPv2 (mschap -> ntlm_auth --request-nt-key
+# --allow-mschapv2 -> winbindd -> the AD DC validates the hash).
+#
+# Verified against:
+#   https://wiki.samba.org/index.php/Setting_up_Samba_as_a_Domain_Member
+#   https://wiki.samba.org/index.php/Authenticating_Freeradius_against_Active_Directory
+#   https://wiki.samba.org/index.php/Idmap_config_rid
+# ============================================================
+
+[global]
+    # AD member with Kerberos (ADS) security. realm = the UPPERCASE Kerberos
+    # realm; workgroup = the NetBIOS/short domain name.
+    security = ADS
+    realm = ${REALM}
+    workgroup = ${WORKGROUP}
+
+    # Verify Kerberos tickets against secrets.tdb FIRST, then the system keytab.
+    # Required so the machine-account secret written by `net ads join` (persisted
+    # in the /var/lib/samba volume) is actually used. Samba's default is
+    # "secrets only". Ref: smbdotconf "kerberos method".
+    kerberos method = secrets and keytab
+
+    # Accept bare usernames without a "DOMAIN\" prefix. EAP identities arrive as a
+    # plain sAMAccountName, so winbind must map "user" -> ${WORKGROUP}\user;
+    # otherwise ntlm_auth would reject the unqualified name. (Samba default: no.)
+    winbind use default domain = yes
+
+    # Keep winbind's Kerberos ticket cache refreshed. Harmless for the ntlm_auth
+    # NT-hash path (which is not TGT-based) and correct for any Kerberos-backed
+    # lookup winbind performs against the DC. (Samba default: no.)
+    winbind refresh tickets = yes
+
+    # ---- MSCHAPv2 for PEAP (verified: SambaWiki "Authenticating Freeradius
+    # against Active Directory") ----
+    # The member's OWN winbindd performs the MSCHAPv2 NT-response exchange, and the
+    # modern Samba default 'ntlm auth = ntlmv2-only' DISALLOWS MSCHAPv2. Set it here
+    # on the member; the AD DC must ALSO carry it (see the honest-limit note below).
+    ntlm auth = mschapv2-and-ntlmv2-only
+
+    # ---- directories (read-only rootfs) ----
+    # Persistent on the /var/lib/samba volume so the machine-account secret (secrets.tdb)
+    # survives restarts; otherwise the member re-joins every boot.
+    state directory = /var/lib/samba
+    private dir = /var/lib/samba/private
+    # Volatile on tmpfs: winbind locks, cache and pid. NOTE: the privileged pipe is NOT
+    # here -- it lives under 'state directory' above as <statedir>/winbindd_privileged
+    # (Samba winbindd.8); the entrypoint grants the freerad user access to it there.
+    lock directory = /run/samba
+    cache directory = /run/samba
+    pid directory = /run/samba
+
+    # ---- idmap: mandatory on a domain member ----
+    # The "*" default domain MUST use a writeable backend (tdb) and its range MUST
+    # NOT overlap the domain range. "rid" derives a deterministic uid/gid from the
+    # AD RID with no allocation state — sufficient for a RADIUS member that only
+    # needs winbind to answer ntlm_auth and never shares files. If POSIX-id parity
+    # with the DC were ever required, this would switch to the "ad" backend.
+    # Ref: SambaWiki "Idmap config rid".
+    idmap config * : backend = tdb
+    idmap config * : range = 3000-7999
+    idmap config ${WORKGROUP} : backend = rid
+    idmap config ${WORKGROUP} : range = 10000-999999
+
+    # This member never shares files and never needs to walk the whole directory;
+    # disabling enumeration keeps winbind lookups cheap.
+    winbind enum users = no
+    winbind enum groups = no
+
+# ------------------------------------------------------------
+# HONEST LIMIT — the following CANNOT be set from the member and are documented
+# here on purpose:
+#
+#  * 'ntlm auth = mschapv2-and-ntlmv2-only' is set above on THIS member, but the AD
+#    DOMAIN CONTROLLER's smb.conf must carry it TOO — otherwise the DC refuses the
+#    MSCHAPv2 NT-response and every WLAN login fails. DC package updates occasionally
+#    drop that line -> monitor it there (out of this container's reach).
+#    Ref: SambaWiki "Authenticating Freeradius against Active Directory".
+#
+#  * The 'freerad' service user must be a member of the 'winbindd_priv' group so
+#    it may read /var/lib/samba/winbindd_privileged (root:winbindd_priv, 0750).
+#    That is a runtime permission handled by the entrypoint, not an smb.conf key.
+# ------------------------------------------------------------

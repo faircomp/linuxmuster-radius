@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#
+# linuxmuster-radius -- OUTER virtual server (sites-enabled/default).
+#
+# HOW IT WIRES: this server terminates EAP/PEAP from the UniFi APs (the NAS,
+# each sending from its own IP). Under PEAP the OUTER identity is anonymous, so
+# the REAL user authentication AND the per-SSID group gate happen in the
+# "inner-tunnel" server (see mods/eap -> peap -> virtual_server, and
+# sites/inner-tunnel). Here we only:
+#   1. normalise Called-Station-Id -> &Called-Station-SSID
+#      (policy rewrite_called_station_id, from policy.d/canonicalization),
+#      BEFORE eap, so copy_request_to_tunnel carries the SSID into the tunnel;
+#   2. run eap, which builds the PEAP tunnel and dispatches the inner
+#      EAP-MSCHAPv2 to the inner-tunnel server.
+#
+# This file is passed through the entrypoint's envsubst step for a uniform
+# render pipeline; the outer server is STATIC and substitutes no instance
+# variables. FreeRADIUS ${...}/%{...} tokens pass through unchanged.
+#
+server default {
+	#  Listen on all interfaces: the APs reach us from the AP-management
+	#  subnet(s) declared in instance.d/clients.conf. port = 0 -> use the
+	#  auth_port/acct_port (1812/1813) from radiusd.conf.
+	listen {
+		type = auth
+		ipaddr = *
+		port = 0
+	}
+	listen {
+		type = acct
+		ipaddr = *
+		port = 0
+	}
+
+	authorize {
+		#  Reject User-Names with invalid characters early.
+		filter_username
+
+		#  RFC 3580: UniFi sends Called-Station-Id = "<AP-MAC>:<SSID>". This
+		#  policy splits it and creates &Called-Station-SSID, which the inner
+		#  tunnel branches on for the per-SSID group gate. It MUST run before eap
+		#  so copy_request_to_tunnel = yes carries the SSID into the tunnel.
+		rewrite_called_station_id
+
+		#  Set Auth-Type if a client ever sends CHAP/MS-CHAP directly. For PEAP
+		#  these are no-ops on the anonymous outer request.
+		chap
+		mschap
+
+		#  eap: for EAP-Message requests, sets Auth-Type := eap and (on the first
+		#  round) returns the Access-Challenge that starts PEAP. 'ok = return'
+		#  short-circuits the rest of authorize once eap has taken the request.
+		eap {
+			ok = return
+		}
+	}
+
+	authenticate {
+		#  Direct MS-CHAP (rare on the outer request).
+		Auth-Type MS-CHAP {
+			mschap
+		}
+
+		#  PEAP/EAP: runs the outer tunnel and, inside it, the inner-tunnel
+		#  server for EAP-MSCHAPv2.
+		eap
+	}
+
+	preacct {
+		preprocess
+		acct_unique
+		suffix
+	}
+
+	accounting {
+		#  Answer Accounting-Response. Detailed accounting logs are optional and
+		#  would need a writable radacct dir (tmpfs/volume); add 'detail' there
+		#  if wanted. 'ok' guarantees a positive reply without that dependency.
+		ok
+	}
+
+	post-auth {
+		#  With use_tunneled_reply = yes (mods/eap) the inner-tunnel reply --
+		#  including the Tunnel-* VLAN attributes set by the per-SSID gate -- is
+		#  already merged onto this outer Access-Accept by the eap/peap module.
+		#  Nothing to copy here.
+
+		#  Access-Reject post-processing (also emits the EAP failure message).
+		Post-Auth-Type REJECT {
+			attr_filter.access_reject
+			eap
+		}
+	}
+}
