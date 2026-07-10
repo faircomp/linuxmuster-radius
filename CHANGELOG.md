@@ -11,6 +11,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 ## [Unreleased]
 
 ### Added
+- **P2 — Control-Plane + CLI (`controlplane/`):** FastAPI-REST-API + Typer-CLI
+  (dünner REST-Client) im Squid-Muster, die den P1-Container-Env-Contract bedient.
+  - `models.py` (`Instance` mit `client_subnets: list`, `ssids: [{name, allowed_group,
+    vlan?}]`, strenge Boundary-Validierung), `config.py`, `security.py` (Bearer-Token,
+    `hmac.compare_digest`), `store.py` (git-backed YAML), `docker_service.py`
+    (`env_for` + Mounts), `reconciler.py`, `updater.py` (digest-pinned, health-gated
+    Auto-Rollback), `api.py`, `cli.py`, `main.py`;
+  - `render.py`: `Instance` → `clients.conf` (ein `client{}` pro `--client-subnet`) +
+    `ssid-policy` (Per-SSID-`Called-Station-SSID`-Gate + optionales VLAN), gemountet
+    nach `/etc/lmnradius/instance.d`;
+  - **Tests: 93 passed**, `ruff` + `mypy` sauber (lokal via `FakeDockerService`, ohne
+    Docker). Die EAP-CA/Cert-Verwaltung (`ca`/`cert`) folgt in P3.
 - **P1 — Data-Plane-Image (`image/`):** generisches, self-contained
   FreeRADIUS-3.2-Image auf Ubuntu 24.04, das die Domäne als Samba-AD-**Member**
   joint (winbind) und PEAP-MSCHAPv2 gegen das AD prüft.
