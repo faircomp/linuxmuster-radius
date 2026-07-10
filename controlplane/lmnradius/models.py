@@ -240,3 +240,62 @@ class UpdateRequest(BaseModel):
         if not _IMAGE_RE.match(v):
             raise ValueError("image must carry an explicit :tag or @sha256:<digest> (no bare repo)")
         return v
+
+
+class CaInitRequest(BaseModel):
+    """Body for ``POST /v1/ca`` — initialise the dedicated EAP CA (ADR-005).
+
+    ``passphrase`` encrypts the CA private key at rest and is required again to
+    sign each server cert; it is never logged or persisted in an instance record.
+    """
+
+    passphrase: str
+    common_name: str = "linuxmuster-radius EAP CA"
+    validity_days: int = 3652  # ~10y
+
+    @field_validator("passphrase")
+    @classmethod
+    def _v_passphrase(cls, v: str) -> str:
+        if not v:
+            raise ValueError("passphrase must not be empty")
+        return v
+
+    @field_validator("validity_days")
+    @classmethod
+    def _v_validity_days(cls, v: int) -> int:
+        if not 1 <= v <= 7305:  # up to ~20y
+            raise ValueError("validity_days must be between 1 and 7305")
+        return v
+
+
+class CertIssueRequest(BaseModel):
+    """Body for ``POST /v1/instances/{name}/cert`` — sign the EAP server cert.
+
+    ``fqdn`` defaults (in the API) to the instance's ``server_fqdn``;
+    ``passphrase`` unlocks the CA signing key and is never logged.
+    """
+
+    passphrase: str
+    fqdn: str | None = None
+    validity_days: int = 1095  # ~3y
+
+    @field_validator("passphrase")
+    @classmethod
+    def _v_passphrase(cls, v: str) -> str:
+        if not v:
+            raise ValueError("passphrase must not be empty")
+        return v
+
+    @field_validator("fqdn")
+    @classmethod
+    def _v_fqdn(cls, v: str | None) -> str | None:
+        if v is not None and not _HOST_RE.match(v):
+            raise ValueError("fqdn must be a valid FQDN")
+        return v
+
+    @field_validator("validity_days")
+    @classmethod
+    def _v_validity_days(cls, v: int) -> int:
+        if not 1 <= v <= 3653:  # up to ~10y
+            raise ValueError("validity_days must be between 1 and 3653")
+        return v

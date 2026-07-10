@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -16,6 +17,20 @@ app = typer.Typer(
     help="linuxmuster-radius control-plane CLI (thin REST client).",
     no_args_is_help=True,
 )
+
+# Dedicated EAP-CA management (ADR-005): a self-contained sub-CA that signs ONLY
+# the RADIUS EAP server cert — the trust anchor supplicants pin.
+ca_app = typer.Typer(
+    help="Manage the dedicated EAP certificate authority.",
+    no_args_is_help=True,
+)
+app.add_typer(ca_app, name="ca")
+
+cert_app = typer.Typer(
+    help="Manage per-instance EAP server certificates.",
+    no_args_is_help=True,
+)
+app.add_typer(cert_app, name="cert")
 
 
 def _get_client() -> httpx.Client:
@@ -239,6 +254,87 @@ def reconcile() -> None:
     """Re-apply all stored instances (reconverge drift / restore on a fresh host)."""
     with _get_client() as c:
         _emit(c.post("/v1/reconcile"))
+
+
+# ------------------------------------------------------------- dedicated EAP CA
+@ca_app.command("init")
+def ca_init(
+    common_name: str = typer.Option(
+        "linuxmuster-radius EAP CA", "--common-name", help="CA certificate subject CN"
+    ),
+    validity_days: int = typer.Option(3652, help="CA validity in days (~10y default)"),
+    passphrase: str = typer.Option(
+        ...,
+        prompt=True,
+        hide_input=True,
+        confirmation_prompt=True,
+        help="passphrase that encrypts the CA private key (prompted; never printed)",
+    ),
+) -> None:
+    """Initialise the dedicated EAP CA (self-signed trust anchor)."""
+    body = {
+        "passphrase": passphrase,
+        "common_name": common_name,
+        "validity_days": validity_days,
+    }
+    with _get_client() as c:
+        _emit(c.post("/v1/ca", json=body))
+
+
+@ca_app.command("show")
+def ca_show() -> None:
+    """Show the EAP CA status (subject, serial, validity, fingerprint)."""
+    with _get_client() as c:
+        _emit(c.get("/v1/ca"))
+
+
+@ca_app.command("export")
+def ca_export(
+    out: Optional[str] = typer.Option(
+        None, "--out", help="write the CA cert PEM to this path (default: stdout)"
+    ),
+) -> None:
+    """Export the CA certificate PEM (the trust anchor to pin on clients)."""
+    with _get_client() as c:
+        resp = c.get("/v1/ca/export")
+    if resp.status_code >= 400:
+        typer.secho(f"error {resp.status_code}: {resp.text}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    if out is not None:
+        Path(out).write_text(resp.text, encoding="utf-8")
+        typer.echo(f"wrote {out}")
+    else:
+        typer.echo(resp.text)
+
+
+# --------------------------------------------------- per-instance EAP server certs
+@cert_app.command("issue")
+def cert_issue(
+    name: str,
+    fqdn: Optional[str] = typer.Option(
+        None, "--fqdn", help="cert CN/SAN; defaults to the instance's server_fqdn"
+    ),
+    validity_days: int = typer.Option(1095, help="server-cert validity in days (~3y default)"),
+    passphrase: str = typer.Option(
+        ...,
+        prompt=True,
+        hide_input=True,
+        help="CA passphrase to unlock the signing key (prompted; never printed)",
+    ),
+) -> None:
+    """Issue (sign) the EAP server cert for an instance."""
+    body: dict[str, Any] = {"passphrase": passphrase, "validity_days": validity_days}
+    if fqdn is not None:
+        body["fqdn"] = fqdn
+    with _get_client() as c:
+        _emit(c.post(f"/v1/instances/{name}/cert", json=body))
+
+
+@cert_app.command("show")
+def cert_show(name: str) -> None:
+    """Show the EAP server-cert status for an instance."""
+    with _get_client() as c:
+        _emit(c.get(f"/v1/instances/{name}/cert"))
 
 
 def main() -> None:

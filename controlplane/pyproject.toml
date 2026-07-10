@@ -22,6 +22,7 @@ dependencies = [
     "pyyaml",
     "typer",
     "httpx",
+    "cryptography",
 ]
 
 [project.urls]

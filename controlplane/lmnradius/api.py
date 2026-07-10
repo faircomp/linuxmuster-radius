@@ -10,11 +10,19 @@ from typing import Any
 
 from docker.errors import DockerException
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
+from . import ca
 from .config import Settings
 from .docker_service import DockerService
-from .models import DEFAULT_IMAGE, Instance, InstancePatch, UpdateRequest
+from .models import (
+    DEFAULT_IMAGE,
+    CaInitRequest,
+    CertIssueRequest,
+    Instance,
+    InstancePatch,
+    UpdateRequest,
+)
 from .reconciler import Reconciler
 from .security import make_verify_token
 from .store import Store
@@ -204,5 +212,87 @@ def create_app(
             return updater.rollback(name)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    # ---------------------------------------------------- dedicated EAP CA + certs
+    # RSA keygen + signing is CPU-bound blocking work, so these routes are plain
+    # `def` (threadpooled). ca.py wraps settings.certs_dir; the passphrase in the
+    # body is passed straight through and NEVER logged.
+    @app.post("/v1/ca", dependencies=auth, status_code=status.HTTP_201_CREATED)
+    def init_ca(body: CaInitRequest) -> dict[str, Any]:
+        """Initialise the dedicated EAP CA (the self-signed trust anchor clients pin)."""
+        try:
+            result = ca.init_ca(
+                settings.certs_dir,
+                body.passphrase,
+                common_name=body.common_name,
+                validity_days=body.validity_days,
+            )
+        except FileExistsError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+        audit.info("init EAP CA common_name=%s", body.common_name)
+        return result
+
+    @app.get("/v1/ca", dependencies=auth)
+    def get_ca() -> dict[str, Any]:
+        """Return the EAP CA status, or 404 if it is not initialised."""
+        result = ca.ca_status(settings.certs_dir)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="EAP CA not initialised"
+            )
+        return result
+
+    @app.get("/v1/ca/export", dependencies=auth)
+    def export_ca() -> PlainTextResponse:
+        """Export the CA certificate PEM (the trust anchor to deploy to clients)."""
+        try:
+            return PlainTextResponse(ca.export_ca(settings.certs_dir))
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @app.post(
+        "/v1/instances/{name}/cert",
+        dependencies=auth,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def issue_cert(name: str, body: CertIssueRequest) -> dict[str, Any]:
+        """Sign the EAP server cert for ``name`` (fqdn defaults to its server_fqdn)."""
+        inst = _require(name)
+        fqdn = body.fqdn or inst.server_fqdn
+        try:
+            result = ca.issue_server_cert(
+                settings.certs_dir,
+                name,
+                fqdn,
+                body.passphrase,
+                validity_days=body.validity_days,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="initialise the EAP CA first",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+        audit.info("issue cert instance=%s fqdn=%s", name, fqdn)
+        return result
+
+    @app.get("/v1/instances/{name}/cert", dependencies=auth)
+    def get_cert(name: str) -> dict[str, Any]:
+        """Return the EAP server-cert status for ``name``, or 404 if unissued."""
+        _require(name)
+        result = ca.cert_status(settings.certs_dir, name)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no EAP server cert for instance {name!r}",
+            )
+        return result
 
     return app

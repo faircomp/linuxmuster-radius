@@ -11,6 +11,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 ## [Unreleased]
 
 ### Added
+- **P3 — Dedizierte EAP-CA (`controlplane/lmnradius/ca.py` + CLI/API + `docs/certs-and-ca.md`):**
+  Single-Purpose-EAP-CA (via `cryptography`), die **nur** das RADIUS-Server-Zertifikat signiert.
+  - `lmnradius ca init` (RSA-4096-Root ~10 J., passphrase-verschlüsselt), `cert issue
+    <instance> [--fqdn]` (Server-Cert mit EKU `serverAuth` + `eapOverLAN`, SAN=FQDN,
+    mehrjährig), `ca export`, plus `ca show` / `cert show`; Ablage `certs_dir/{ca,<name>}/…`
+    → gemountet nach `/run/secrets/eap/*` (der Container ist **fail-closed** ohne Cert);
+  - `docs/certs-and-ca.md`: Anleitung inkl. Offline-Root-Empfehlung, GPO/MDM-Verteilung und
+    der Client-Pinning-Pflichten (Validierung AN + CA-Pin + Server-Name-Pin + Prompt AUS);
+  - **Tests: 114 passed** (+21), `ruff` + `mypy` sauber.
 - **P2 — Control-Plane + CLI (`controlplane/`):** FastAPI-REST-API + Typer-CLI
   (dünner REST-Client) im Squid-Muster, die den P1-Container-Env-Contract bedient.
   - `models.py` (`Instance` mit `client_subnets: list`, `ssids: [{name, allowed_group,

@@ -107,7 +107,7 @@ Research-Workflows am **2026-07-10** (Konfidenz in Klammern).
 - PEAP-MSCHAPv2 ist kryptographisch schwach → **erzwungene Server-Cert-Validierung
   (CA-Pinning) ist tragend**, nicht optional; ohne sie MITM/Credential-Diebstahl. (high)
   — https://securew2.com/blog/peap-mschapv2-vulnerability
-- Client-Trias verpflichtend: Server-Cert-Validierung AN + Trusted-CA = das EINE
+- Client-Pinning verpflichtend (vier Punkte): Server-Cert-Validierung AN + Trusted-CA = das EINE
   EAP-Root + Server-Name gepinnt + „neues Zertifikat akzeptieren“ AUS. (high)
   — https://eduroam.ac.za/faq/certificates/
   — https://support.apple.com/guide/deployment/connect-to-8021x-networks-depabc994b84/web
