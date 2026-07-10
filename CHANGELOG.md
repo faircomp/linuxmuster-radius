@@ -10,7 +10,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
-_Noch keine Änderungen._
+### Added
+- **Renovate-Digest-Automatik:** ein `renovate.json`-customManager, der den
+  `DEFAULT_IMAGE`-`@sha256`-Pin in `controlplane/lmnradius/models.py` +
+  `deploy/instances/*.yaml` verfolgt (Tag `:latest`), plus ein self-hosted
+  `.github/workflows/renovate.yml` (wöchentlich + `workflow_dispatch`) — Renovate schlägt
+  Digest-Bumps als PR vor (automerge aus, Mensch merged → neues `.deb`).
+- **`docs/install.md`:** Schritt-für-Schritt-Erstinstallation (VM → `.deb` → AD-Setup → CA →
+  Instanz + Cert → UniFi/OPNsense → Client-Pinning → Abnahme → Updates).
+
+### Changed
+- **`DEFAULT_IMAGE` auf den gebauten GHCR-Digest gepinnt** (`…@sha256:4b052ab9…`, das
+  v0.1.0-Image), damit die Control-Plane exakt das von der CI gebaute Image zieht.
 
 ## [0.1.0] - 2026-07-10
 
