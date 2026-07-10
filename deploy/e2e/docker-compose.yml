@@ -1,0 +1,169 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# ============================================================================
+# linuxmuster-radius — E2E stack (heavy tier / crabbox, Docker).
+#
+# AUTHORED on the dev box, RUN by the operator on crabbox (a real Linux box with
+# Docker). The sandboxed dev box cannot run this (needs a privileged Samba AD DC).
+#
+# WHAT THIS PROVES (a real FreeRADIUS built from ../../image, joined to a Samba
+# AD as a MEMBER, doing PEAP-MSCHAPv2 via winbind), the 5-case matrix driven by
+# the `client` service's assert.sh:
+#   1. teacher on the teacher SSID   -> Access-Accept + Tunnel-Private-Group-Id 20
+#   2. student on the teacher SSID   -> Access-Reject (right SSID, wrong role)
+#   3. student on the student SSID   -> Access-Accept + Tunnel-Private-Group-Id 10
+#   4. teacher with a WRONG password -> Access-Reject
+#   5. a user NOT in the wifi group  -> Access-Reject (base gate)
+# Together these exercise: member domain-join in the container, winbindd + the
+# winbindd_privileged pipe perms, ntlm_auth NT-hash validation, the
+# rewrite_called_station_id -> &Called-Station-SSID branch, the rlm_ldap group
+# check, and the Tunnel-* VLAN reply.
+#
+# HONEST LIMIT — what this does NOT prove: the DC here is a PLAIN Samba AD DC
+# whose users/groups/join-account/bind-account are provisioned DIRECTLY (dc/).
+# It does NOT exercise the linuxmuster Sophomorix / devices.csv role='server'
+# registration path (that pre-creates the computer account which `net ads join`
+# would then ADOPT). The E2E's join account is a Domain Admin, so `net ads join`
+# simply CREATES the machine account. The Sophomorix adoption path still needs a
+# real linuxmuster server and is documented as NICHT VERIFIZIERT in
+# docs/radius-and-ad.md. Likewise, cert generation (certs/) uses openssl, not
+# the control plane's `lmnradius cert issue` (that crypto is unit-tested).
+#
+# RUN ORDER (prerequisites are out-of-band on purpose — three services only):
+#   1. bash certs/gen-certs.sh          # mint the EAP CA + server cert into certs/out/
+#   2. docker compose build
+#   3. docker compose up --abort-on-container-exit --exit-code-from client
+#      -> the `client` service exit code IS the E2E result (0 = all 5 cases pass).
+#   4. docker compose down -v           # reset volumes so the next run re-provisions
+#                                       #   the DC and re-joins the member cleanly.
+# ============================================================================
+name: lmnradius-e2e
+
+networks:
+  e2e:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+
+volumes:
+  dc-state: {}       # DC domain database (sam.ldb, DNS zone, secrets)
+  radius-state: {}   # member machine-account secret (secrets.tdb) — the /var/lib/samba contract
+
+services:
+  # --------------------------------------------------------------------------
+  # (a) Samba AD DC — KDC + LDAP(S) + internal DNS for realm EXAMPLE.LMN.
+  # Provisions the domain on first start (dc/entrypoint.sh) and then seeds the
+  # fixtures (dc/bootstrap.sh): groups wifi/teachers/students; users teacher1
+  # (wifi+teachers), student1 (wifi+students), nowifi1 (neither); a join account
+  # (radiusjoin, Domain Admin — E2E shortcut) and an LDAP bind account
+  # (binduser); the A-record radius.example.lmn; and 'ntlm auth =
+  # mschapv2-and-ntlmv2-only' on the DC (without which every MSCHAPv2 login
+  # fails — see radius-and-ad.md §4).
+  # --------------------------------------------------------------------------
+  dc:
+    build: ./dc
+    hostname: dc
+    privileged: true                 # a real Samba AD DC needs elevated privileges
+    environment:
+      REALM: "EXAMPLE.LMN"
+      WORKGROUP: "EXAMPLE"
+      ADMIN_PASSWORD: "Passw0rd!"     # TEST-ONLY, non-production
+      USER_PASSWORD: "Passw0rd!"      # TEST-ONLY, non-production
+      JOIN_USER: "radiusjoin"
+      JOIN_PASSWORD: "Passw0rd!"      # TEST-ONLY, non-production — MUST match secrets/join.authfile
+      BIND_USER: "binduser"
+      BIND_PASSWORD: "Passw0rd!"      # TEST-ONLY, non-production — MUST match secrets/ldap_bind.secret
+      RADIUS_FQDN: "radius.example.lmn"
+      RADIUS_IP: "172.29.0.10"        # the static IP the DC publishes as radius A-record
+    networks:
+      e2e:
+        ipv4_address: 172.29.0.2
+    volumes:
+      - dc-state:/var/lib/samba
+    # Healthy only once the domain is fully up AND the fixtures are seeded
+    # (bootstrap writes the marker last) — so the member never tries to join a
+    # half-provisioned DC.
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/lib/samba/.e2e-ready && host -t A radius.example.lmn 127.0.0.1 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # --------------------------------------------------------------------------
+  # (b) The image under test — FreeRADIUS built from ../../image. Its container
+  # hostname EQUALS SERVER_FQDN (the entrypoint's hard requirement) and it uses
+  # the DC as its only resolver so the SRV records (_ldap._tcp / _kerberos._tcp)
+  # and the radius.example.lmn A-record resolve. The env below is EXACTLY the
+  # image env contract (image/entrypoint.sh); the secret/cert paths point at the
+  # read-only mounts. instance.d/{clients.conf,ssid-policy} are mounted DIRECTLY
+  # (the control-plane rendering of these is already unit-tested).
+  # --------------------------------------------------------------------------
+  radius:
+    build: ../../image
+    image: linuxmuster-radius:dev
+    hostname: radius.example.lmn      # == SERVER_FQDN; Docker adds it to /etc/hosts
+    depends_on:
+      dc:
+        condition: service_healthy
+    restart: "no"                     # a failed join must surface, not loop
+    environment:
+      INSTANCE: "e2e"
+      REALM: "EXAMPLE.LMN"
+      WORKGROUP: "EXAMPLE"
+      SERVER_FQDN: "radius.example.lmn"
+      LDAP_SERVER: "ldaps://dc.example.lmn"
+      LDAP_BASE_DN: "DC=example,DC=lmn"
+      LDAP_BIND_DN: "CN=binduser,CN=Users,DC=example,DC=lmn"
+      WIFI_GROUP: "wifi"
+      # Secret FILE mounts (these hold PATHS; the entrypoint reads the files).
+      LDAP_BIND_SECRET: "/run/secrets/ldap_bind.secret"
+      JOIN_SECRET: "/run/secrets/join.authfile"
+      EAP_CA: "/run/secrets/eap/ca.pem"
+      EAP_CERT: "/run/secrets/eap/server.pem"
+      EAP_KEY: "/run/secrets/eap/server.key"
+    dns: ["172.29.0.2"]               # the DC's SAMBA_INTERNAL DNS
+    networks:
+      e2e:
+        ipv4_address: 172.29.0.10
+    volumes:
+      # secrets (read-only)
+      - ./secrets/ldap_bind.secret:/run/secrets/ldap_bind.secret:ro
+      - ./secrets/join.authfile:/run/secrets/join.authfile:ro
+      # EAP cert material minted by certs/gen-certs.sh (read-only)
+      - ./certs/out/ca.pem:/run/secrets/eap/ca.pem:ro
+      - ./certs/out/server.pem:/run/secrets/eap/server.pem:ro
+      - ./certs/out/server.key:/run/secrets/eap/server.key:ro
+      # per-instance config, mounted directly (control-plane render is unit-tested)
+      - ./instance.d/clients.conf:/etc/lmnradius/instance.d/clients.conf:ro
+      - ./instance.d/ssid-policy:/etc/lmnradius/instance.d/ssid-policy:ro
+      # persistent machine-account secret (the /var/lib/samba contract)
+      - radius-state:/var/lib/samba
+
+  # --------------------------------------------------------------------------
+  # (c) The supplicant — eapol_test (built from wpa_supplicant source) drives
+  # PEAP-MSCHAPv2 and runs the 5-case matrix (client/assert.sh is the ENTRYPOINT).
+  # It waits for `radius` to be HEALTHY (the image healthcheck proves winbind
+  # trust + a listening radiusd), so no auth is attempted before the member has
+  # joined and warmed up. It addresses the server by static IP but pins the
+  # server certificate by name (domain_suffix_match = SERVER_FQDN).
+  # --------------------------------------------------------------------------
+  client:
+    build: ./client
+    depends_on:
+      radius:
+        condition: service_healthy
+    environment:
+      RADIUS_IP: "172.29.0.10"
+      RADIUS_PORT: "1812"
+      AP_MAC: "00-11-22-33-44-55"     # the fake AP MAC in Called-Station-Id
+      SERVER_FQDN: "radius.example.lmn"
+    networks:
+      e2e:
+        ipv4_address: 172.29.0.30
+    volumes:
+      - ./certs/out/ca.pem:/etc/eap/ca.pem:ro          # the CA the supplicant pins
+      - ./secrets/radius.secret:/run/secrets/radius.secret:ro

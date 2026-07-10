@@ -76,10 +76,12 @@ e2e(){
     return
   fi
   if ! have docker; then skip "freeradius-e2e" "docker not installed"; return; fi
-  if [ -x scripts/tests/e2e_freeradius.sh ]; then
-    run_step "freeradius-e2e" docker bash scripts/tests/e2e_freeradius.sh
+  if [ -x scripts/tests/e2e_radius.sh ]; then
+    # e2e_radius.sh brings up deploy/e2e, runs the 5-case PEAP-MSCHAPv2 matrix and
+    # tears the stack down; it self-gates on LMNRADIUS_ALLOW_REAL=1 as well.
+    run_step "freeradius-e2e" docker bash scripts/tests/e2e_radius.sh
   else
-    skip "freeradius-e2e" "scripts/tests/e2e_freeradius.sh missing (comes in P6)"
+    skip "freeradius-e2e" "scripts/tests/e2e_radius.sh missing"
   fi
 }
 

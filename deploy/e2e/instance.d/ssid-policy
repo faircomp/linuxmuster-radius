@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#
+# linuxmuster-radius E2E — per-SSID group gate + dynamic VLAN.
+#
+# Mounted read-only at /etc/lmnradius/instance.d/ssid-policy; the inner-tunnel
+# post-auth section '$-INCLUDE's it (image/templates/sites/inner-tunnel.template).
+# Shape mirrors image/templates/instance.d/ssid-policy — this is exactly what the
+# P2 control plane would emit for a two-SSID instance.
+#
+# Context (PEAP inner tunnel, real identity known):
+#   &Called-Station-SSID   the SSID, from rewrite_called_station_id in the outer
+#                          server, copied in by copy_request_to_tunnel = yes.
+#   &LDAP-Group == "<cn>"  a live AD group-membership check (rlm_ldap).
+# With use_tunneled_reply = yes the Tunnel-* attributes land on the OUTER
+# Access-Accept (Tunnel-Type VLAN = 13, Tunnel-Medium-Type IEEE-802 = 6).
+#
+# The base 'wifi' gate (ntlm_auth --require-membership-of, mods/mschap) has
+# already run before this include — a user not in 'wifi' never reaches here.
+#
+
+if (&Called-Station-SSID == "EXAMPLE-lehrer") {
+	if (&LDAP-Group == "teachers") {
+		update reply {
+			&Tunnel-Type := VLAN
+			&Tunnel-Medium-Type := IEEE-802
+			&Tunnel-Private-Group-Id := "20"
+		}
+	}
+	else {
+		reject          # right SSID, wrong role -> deny
+	}
+}
+elsif (&Called-Station-SSID == "EXAMPLE-schueler") {
+	if (&LDAP-Group == "students") {
+		update reply {
+			&Tunnel-Type := VLAN
+			&Tunnel-Medium-Type := IEEE-802
+			&Tunnel-Private-Group-Id := "10"
+		}
+	}
+	else {
+		reject
+	}
+}
+else {
+	reject              # unknown SSID on this instance -> deny
+}

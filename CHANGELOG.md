@@ -11,6 +11,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 ## [Unreleased]
 
 ### Added
+- **P6 — E2E-Harness + Rest-Docs (`deploy/e2e/`, `scripts/tests/`, `.claude/`, `docs/operations.md`):**
+  die crabbox-E2E, die das P1-Image zur Laufzeit beweist.
+  - `deploy/e2e/docker-compose.yml`: Samba-AD-DC + die als Member gejointe FreeRADIUS-Instanz +
+    `eapol_test`-Supplicant; 5-Fälle-Matrix (Lehrer@Lehrer→Accept+VLAN20, Schüler@Lehrer→Reject,
+    Schüler@Schüler→Accept+VLAN10, falsches PW→Reject, kein `wifi`→Reject);
+  - `scripts/tests/e2e_radius.sh` (dünner Wrapper, `--exit-code-from client`) +
+    `crabbox_bootstrap.sh`; `run.sh` `e2e`-Tier verdrahtet (verweigert ohne `LMNRADIUS_ALLOW_REAL=1`);
+  - `.claude/skills/test/SKILL.md` (crabbox-Lifecycle) + `.claude/settings.json`;
+  - `docs/operations.md` (Day-2-Betrieb).
+  - **Ehrlich:** beweist Join + PEAP + Gruppe→VLAN, **nicht** den linuxmuster-`devices.csv`-Pfad
+    (braucht einen echten linuxmuster-Server). Der Lauf erfolgt auf crabbox, nicht auf der Dev-Box.
 - **P5 — Packaging + CI (`packaging/`, `deploy/`, `.github/workflows/`, `scripts/tests/run.sh`):**
   - `.deb` via `packaging/build-deb.sh` (hermetisches venv unter `/opt/linuxmuster-radius/venv`)
     + `packaging/debian/{control,postinst,prerm,postrm}` (postinst: System-User `lmnradius`,
