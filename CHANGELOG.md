@@ -11,6 +11,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 ## [Unreleased]
 
 ### Added
+- **P4 — Deployment (`docs/{radius-and-ad,deployment-gpo}.md` + `scripts/`):** die Betriebs-/
+  Rollout-Anleitung plus zwei DC-Helfer.
+  - `docs/radius-and-ad.md`: AD-Member-Setup (winbind/`ntlm_auth`, `devices.csv` Rolle
+    `server` + `linuxmuster-import-devices`, `global-binduser`, DC-`ntlm auth`, DNS/Hostname) —
+    Sophomorix bleibt unangetastet;
+  - `docs/deployment-gpo.md`: UniFi (ein RADIUS-Profil, SSID→statisches VLAN, AP-Subnetz als
+    Client-CIDR), OPNsense (`1812-1813/udp`), Client-Trust via GPO/MDM mit den Pinning-Pflichten,
+    „Steering vs. Enforcement" und eine Abnahme-Checkliste (human gate);
+  - `scripts/discover-ad-facts.sh` (read-only: realm/workgroup/Base-DN/Gruppen → fertige
+    `lmnradius create`-Vorlage) + `scripts/provision-radius-account.sh` (idempotente
+    Device-Registrierung + Secret-Dateien); beide `shellcheck`-sauber.
 - **P3 — Dedizierte EAP-CA (`controlplane/lmnradius/ca.py` + CLI/API + `docs/certs-and-ca.md`):**
   Single-Purpose-EAP-CA (via `cryptography`), die **nur** das RADIUS-Server-Zertifikat signiert.
   - `lmnradius ca init` (RSA-4096-Root ~10 J., passphrase-verschlüsselt), `cert issue

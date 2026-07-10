@@ -123,11 +123,11 @@ Der Export enthält **ausschließlich** das öffentliche CA-Zertifikat (`ca.cert
 privaten `ca.key.pem`.
 Verteilung nach Plattform:
 
-- **Windows via GPO** — Schwesterprojekt **`linuxmuster-gpo-template`**: `cacert.pem` als
+- **Windows via GPO** — Schwesterprojekt **`linuxmuster-gpo-template`**: `eap-ca.pem` als
   **Trusted-Root-CA** in den Maschinen-Zertifikatsspeicher importieren **und** ein
   **gesperrtes WLAN-Profil** (Wireless Network Policy) ausrollen, das die gegenseitige
   Authentisierung erzwingt.
-- **Apple / Android via MDM/EMM** — `cacert.pem` plus WLAN-Konfiguration als
+- **Apple / Android via MDM/EMM** — `eap-ca.pem` plus WLAN-Konfiguration als
   **`.mobileconfig`** (Apple) bzw. per EMM-WLAN-Policy (Android). Das Profil setzt Trust-Anker
   und Servername in einem Zug — der Nutzer kann die Prüfung nicht wegklicken.
 
@@ -137,7 +137,7 @@ WLAN-Profil **alle** der folgenden Punkte setzen — ein fehlender Punkt macht d
 1. **Serverzertifikat-Validierung AN** — „Validate server certificate" / „Serverzertifikat
    überprüfen" **eingeschaltet**.
 2. **Trusted-CA = die eine EAP-Root** — als Trust-Anker **ausschließlich** die exportierte
-   EAP-Root (`cacert.pem`), **nicht** die System-Trust-Stores der Öffentlichkeit, **nicht**
+   EAP-Root (`eap-ca.pem`), **nicht** die System-Trust-Stores der Öffentlichkeit, **nicht**
    die linuxmuster-CA.
 3. **Trusted-Server-Name = FQDN gepinnt** — der erwartete Servername (= `SAN`/CN des
    Server-Zertifikats, § 3) ist **fest hinterlegt**; ohne diesen Pin würde jedes von der Root
