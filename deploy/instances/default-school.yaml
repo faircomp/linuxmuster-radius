@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Example instance: the default-school FreeRADIUS deployment.
+# One file = one self-contained instance (ADR-002); its SSIDs are gated in the
+# inner tunnel (ADR-007). This is an EXAMPLE — the control plane owns the real
+# files under /var/lib/linuxmuster-radius/instances (see README.md).
+name: default-school
+realm: LINUXMUSTER.MEINESCHULE.DE
+workgroup: LINUXMUSTER
+server_fqdn: radius.linuxmuster.meineschule.de
+ldap_server: ldaps://dc01.linuxmuster.meineschule.de:636
+ldap_base_dn: DC=linuxmuster,DC=meineschule,DC=de
+ldap_bind_dn: CN=lmn-radius,OU=Management,DC=linuxmuster,DC=meineschule,DC=de
+wifi_group: wifi
+# AP-management subnet(s) that may talk RADIUS (clients.conf); MEHRERE ok (ADR-009).
+client_subnets:
+  - 10.0.0.0/16
+  - 10.16.0.0/16
+ssids:
+  - name: Kollegium
+    allowed_group: teachers
+    vlan: 10
+  - name: Schueler-WLAN
+    allowed_group: students
+    vlan: 20
+# Secret FILENAMES (basenames under secrets_dir), never the secret values.
+join_secret: default-school.join
+ldap_bind_secret: default-school.ldap-bind
+radius_secret: default-school.radius
+# Digest-pinned in production (Renovate, P5). The 64-hex digest below is illustrative.
+image: ghcr.io/faircomp/linuxmuster-radius@sha256:5c2e9f0b7a4d1e638f9c0a2b4d6e8f0a1c3e5d7b9f1a3c5e7d9b1f3a5c7e9d0b

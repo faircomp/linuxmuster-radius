@@ -11,6 +11,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 ## [Unreleased]
 
 ### Added
+- **P5 — Packaging + CI (`packaging/`, `deploy/`, `.github/workflows/`, `scripts/tests/run.sh`):**
+  - `.deb` via `packaging/build-deb.sh` (hermetisches venv unter `/opt/linuxmuster-radius/venv`)
+    + `packaging/debian/{control,postinst,prerm,postrm}` (postinst: System-User `lmnradius`,
+    zufälliges API-Token, `config.yml` mit den echten `Settings`-Keys inkl. `certs_dir`/
+    `render_dir`, `0700` secrets+certs, git-init, `update-all` beim Upgrade) + gehärtete
+    `packaging/systemd/linuxmuster-radius.service`;
+  - `deploy/docker-socket-proxy.yml` (minimale Allow-List) + `deploy/instances/default-school.yaml`
+    (Beispiel, läuft durchs Instance-Model) + `scripts/tests/run.sh`
+    (Aggregat-Runner `lint|unit|quick|e2e`; `e2e` verweigert ohne `LMNRADIUS_ALLOW_REAL=1`);
+  - CI: `ci.yml` (ruff/mypy/pytest/shellcheck/reuse), `build-image.yml` (GHCR) und `build-deb.yml`.
+  - Lokal verifiziert: `shellcheck` sauber, YAMLs valide, `reuse lint` 62/62 konform,
+    `run.sh quick` grün (114 pytest). Der echte `.deb`-Build/Install läuft in der CI.
 - **P4 — Deployment (`docs/{radius-and-ad,deployment-gpo}.md` + `scripts/`):** die Betriebs-/
   Rollout-Anleitung plus zwei DC-Helfer.
   - `docs/radius-and-ad.md`: AD-Member-Setup (winbind/`ntlm_auth`, `devices.csv` Rolle

@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -e
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+# Deliberately do NOT delete config/state + venv on remove (only on purge).
+if [ "$1" = "purge" ]; then
+    rm -rf /opt/linuxmuster-radius
+    rm -rf /etc/linuxmuster-radius /var/lib/linuxmuster-radius
+fi
+exit 0

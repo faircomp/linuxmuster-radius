@@ -1,0 +1,79 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -e
+
+# System user (in the docker group for socket access)
+if ! getent passwd lmnradius >/dev/null 2>&1; then
+    adduser --system --group --no-create-home \
+        --home /var/lib/linuxmuster-radius lmnradius
+fi
+if getent group docker >/dev/null 2>&1; then
+    usermod -aG docker lmnradius || true
+fi
+
+# Config + secrets + EAP certs live under /etc; instances (git log) + rendered
+# instance.d configs live under /var/lib. Keys below MUST match lmnradius.config.Settings.
+mkdir -p /etc/linuxmuster-radius/secrets /etc/linuxmuster-radius/certs \
+         /var/lib/linuxmuster-radius/instances /var/lib/linuxmuster-radius/instance.d
+
+# Config with a random API token (only if it does not exist yet)
+CFG=/etc/linuxmuster-radius/config.yml
+if [ ! -f "$CFG" ]; then
+    TOKEN="$(openssl rand -hex 32)"
+    # umask 077 -> file is created with 0600 (no 0644 window for the API token).
+    ( umask 077
+      cat > "$CFG" <<EOF
+api_token: "$TOKEN"
+instances_dir: /var/lib/linuxmuster-radius/instances
+secrets_dir: /etc/linuxmuster-radius/secrets
+certs_dir: /etc/linuxmuster-radius/certs
+render_dir: /var/lib/linuxmuster-radius/instance.d
+bind_host: 127.0.0.1
+bind_port: 8080
+api_url: http://127.0.0.1:8080
+EOF
+    )
+    chmod 600 "$CFG"
+fi
+
+chown -R lmnradius:lmnradius /etc/linuxmuster-radius /var/lib/linuxmuster-radius
+# secrets holds per-client shared secrets; certs holds EAP CA + server keys.
+chmod 700 /etc/linuxmuster-radius/secrets /etc/linuxmuster-radius/certs
+
+# Initialize instances_dir as a git repo -> Store changes are committed as a change log
+# (Store._git is best-effort and needs a repo + identity).
+INST_DIR=/var/lib/linuxmuster-radius/instances
+if command -v git >/dev/null 2>&1 && [ ! -d "$INST_DIR/.git" ]; then
+    git -C "$INST_DIR" init -q || true
+    git -C "$INST_DIR" config user.name  "linuxmuster-radius" || true
+    git -C "$INST_DIR" config user.email "lmnradius@localhost" || true
+    chown -R lmnradius:lmnradius "$INST_DIR/.git" || true
+fi
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl enable linuxmuster-radius.service || true
+    # Load new code on a genuine upgrade (try-restart no-ops if the service is not
+    # running), then start unconditionally so it is up in ALL cases -- fresh install
+    # AND reinstall over a removed/config-files state, where try-restart alone would
+    # leave it stopped. `start` is a no-op if it is already running.
+    if [ -n "${2:-}" ]; then
+        systemctl try-restart linuxmuster-radius.service || true
+    fi
+    systemctl start linuxmuster-radius.service || true
+    # On upgrade, lift all running instances onto this package's pinned default
+    # image (best-effort; each instance updates with its own health-check
+    # auto-rollback). Wait briefly for the restarted API; never fail the install.
+    if [ -n "${2:-}" ]; then
+        LMN=/opt/linuxmuster-radius/venv/bin/lmnradius
+        i=0
+        while [ "$i" -lt 30 ]; do
+            "$LMN" health >/dev/null 2>&1 && break
+            i=$((i + 1)); sleep 1
+        done
+        "$LMN" update-all >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0

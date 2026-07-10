@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Build the control-plane .deb and publish it: always as a workflow artifact, and on a
+# v* tag also as a GitHub Release asset -> install with `apt install ./linuxmuster-radius_*.deb`.
+name: build-deb
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths: ["controlplane/**", "packaging/**", ".github/workflows/build-deb.yml"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version (no leading v)"
+        default: "0.0.0-dev"
+
+permissions:
+  contents: write   # create/upload the GitHub Release asset on a tag
+
+jobs:
+  build:
+    # Match the target OS so the venv's python interpreter (3.12) lines up.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="${{ github.event.inputs.version || '0.0.0-dev' }}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build .deb
+        run: sudo VERSION="${{ steps.ver.outputs.version }}" bash packaging/build-deb.sh
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linuxmuster-radius-deb
+          path: linuxmuster-radius_*.deb
+          if-no-files-found: error
+      - name: Publish to the GitHub Release (tags only)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes || true
+          gh release upload "${GITHUB_REF_NAME}" linuxmuster-radius_*.deb --clobber

@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -e
+# Stop/disable ONLY on a real remove. On upgrade ($1=upgrade), keep the service
+# RUNNING so postinst can restart it via try-restart (new code); stopping it here
+# would leave it inactive after the upgrade.
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+    systemctl disable --now linuxmuster-radius.service || true
+fi
+exit 0

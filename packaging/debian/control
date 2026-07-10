@@ -1,0 +1,13 @@
+Package: linuxmuster-radius
+Version: @VERSION@
+Architecture: all
+Maintainer: Kevin Stenzel <kevin@ks98.de>
+Section: admin
+Priority: optional
+Depends: python3 (>= 3.11), adduser, openssl, git
+Recommends: docker.io | docker-ce
+Description: REST API + CLI managing per-school FreeRADIUS containers
+ Control plane that provisions and reconciles per-school FreeRADIUS (WLAN 802.1X)
+ Docker containers: AD-backed EAP auth, a control-plane CA issuing EAP server
+ certs, per-client shared secrets, and digest-pinned, health-checked, auto-rolling
+ updates. Ships a self-contained Python virtualenv under /opt/linuxmuster-radius.

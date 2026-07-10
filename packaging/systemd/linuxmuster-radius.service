@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=linuxmuster-radius control plane (REST API)
+Documentation=https://github.com/faircomp/linuxmuster-radius
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=lmnradius
+SupplementaryGroups=docker
+ExecStart=/opt/linuxmuster-radius/venv/bin/lmnradius-api
+Environment=LMNRADIUS_CONFIG=/etc/linuxmuster-radius/config.yml
+Restart=on-failure
+RestartSec=3
+
+# --- Hardening (Docker socket access stays root-equivalent -> add a socket proxy) ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+ProtectClock=yes
+ProtectHostname=yes
+SystemCallArchitectures=native
+# /etc: the API writes EAP CA + server certs into certs/. /var/lib: instances git log
+# + rendered instance.d configs.
+ReadWritePaths=/etc/linuxmuster-radius /var/lib/linuxmuster-radius
+
+[Install]
+WantedBy=multi-user.target

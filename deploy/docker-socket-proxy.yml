@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Filtered Docker socket proxy. The direct /var/run/docker.sock is root-equivalent;
+# instead this proxy exposes ONLY the endpoints the control plane needs,
+# at tcp://127.0.0.1:2375. Then set in /etc/linuxmuster-radius/config.yml:
+#   docker_host: "tcp://127.0.0.1:2375"
+# and restart the service. (ADR-012.)
+services:
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2   # fixed version instead of :latest (Renovate pins the @sha256 digest)
+    environment:
+      CONTAINERS: "1"   # create/inspect/start/stop/remove/logs
+      IMAGES: "1"       # pull the digest-pinned data-plane image
+      VOLUMES: "1"      # per-instance render/state volumes
+      POST: "1"         # allow mutating calls
+      INFO: "1"
+      # Everything else explicitly off (minimize attack surface):
+      EXEC: "0"          # the control plane never execs into containers; live logs
+                         # use the container.logs API (CONTAINERS), not docker exec.
+      NETWORKS: "0"
+      AUTH: "0"
+      SECRETS: "0"
+      SWARM: "0"
+      SYSTEM: "0"
+      CONFIGS: "0"
+      NODES: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:2375:2375"
+    read_only: true
+    tmpfs: ["/run", "/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped

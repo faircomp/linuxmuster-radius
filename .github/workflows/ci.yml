@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Fast tier: control-plane lint/type/unit + shell + license compliance.
+# (The heavy Kerberos + docker-py FreeRADIUS E2E runs on crabbox, not in GitHub CI.)
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install control-plane + tools
+        run: pip install ruff mypy pytest pytest-asyncio httpx types-PyYAML cryptography reuse ./controlplane
+      - name: ruff check
+        run: ruff check .
+      - name: ruff format
+        run: ruff format --check .
+      - name: mypy
+        run: mypy --config-file controlplane/pyproject.toml controlplane/lmnradius
+      - name: pytest
+        run: pytest -q controlplane/tests
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=warning \
+            image/*.sh scripts/*.sh packaging/*.sh \
+            packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm
+      - name: reuse (license compliance)
+        run: reuse lint
