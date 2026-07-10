@@ -28,4 +28,4 @@ join_secret: default-school.join
 ldap_bind_secret: default-school.ldap-bind
 radius_secret: default-school.radius
 # Digest-pinned in production (Renovate, P5). The 64-hex digest below is illustrative.
-image: ghcr.io/faircomp/linuxmuster-radius@sha256:5c2e9f0b7a4d1e638f9c0a2b4d6e8f0a1c3e5d7b9f1a3c5e7d9b1f3a5c7e9d0b
+image: ghcr.io/faircomp/linuxmuster-radius@sha256:4b052ab9017c1051f02290fd2845593dee4f06ed63e61b6a0393ccd3c2c52aa4

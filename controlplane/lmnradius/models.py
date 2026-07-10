@@ -51,10 +51,11 @@ _IMAGE_RE = re.compile(
 )
 
 # Default data-plane image for new/updated instances, so callers need not pass
-# --image. This is a :tag PLACEHOLDER; P5/Renovate will pin it to an immutable
-# ``@sha256:<digest>`` (same rationale as linuxmuster-squid). The image validator
-# still requires an explicit :tag or @sha256 and rejects a bare repo either way.
-DEFAULT_IMAGE = "ghcr.io/faircomp/linuxmuster-radius:0.1.0"
+# --image. Pinned to an immutable ``@sha256:<digest>`` — the v0.1.0 image built and
+# published to GHCR by the build-image workflow; Renovate keeps it current (same
+# rationale as linuxmuster-squid). The image validator requires an explicit :tag or
+# @sha256 and rejects a bare repo either way.
+DEFAULT_IMAGE = "ghcr.io/faircomp/linuxmuster-radius@sha256:4b052ab9017c1051f02290fd2845593dee4f06ed63e61b6a0393ccd3c2c52aa4"
 
 
 class SSID(BaseModel):
