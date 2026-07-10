@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+_Noch keine Änderungen._
+
+## [0.1.0] - 2026-07-10
+
+**Erstes Release — die vollständige linuxmuster-radius-Erstauslieferung (P0–P6):**
+Control-/Data-Plane, dedizierte EAP-CA, Deployment-Anleitungen, Packaging/CI und die
+crabbox-E2E-Harness. Der **Control-Plane-Stack ist lokal bewiesen** (114 pytest,
+ruff/mypy/reuse grün); der Data-Plane-**Runtime**-Beweis (Container-Domänen-Join +
+PEAP-Flow) läuft über den crabbox-E2E bzw. den Ersteinsatz. Details in
+[`docs/`](docs/) und der [`README.md`](README.md).
+
 ### Added
 - **P6 — E2E-Harness + Rest-Docs (`deploy/e2e/`, `scripts/tests/`, `.claude/`, `docs/operations.md`):**
   die crabbox-E2E, die das P1-Image zur Laufzeit beweist.
@@ -83,16 +94,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
   - Gegen die offiziellen FreeRADIUS-/Samba-Docs verifiziert (`$INCLUDE`-Auflösung,
     `confdir`/`raddbdir`, `winbindd_privileged`-Pfad, `ntlm_auth --configfile`).
     **Runtime-Verifikation (Join + PEAP-Flow) folgt im crabbox-E2E in P6.**
-
-## [0.1.0] - 2026-07-10
-
-**Projekt-Gerüst / P0** — Scaffold, Konventionen und die Architektur-/
-Entscheidungs-Docs. Noch **kein lauffähiger Code**: Control-/Data-Plane,
-Image und E2E folgen; die menschlichen Gates stehen in der
-[`README.md`](README.md).
-
-### Added
-- **Repository-Scaffold:** Verzeichnislayout für Control Plane
+- **P0 — Repository-Scaffold:** Verzeichnislayout für Control Plane
   (`controlplane/lmnradius/`), Data-plane-Image (`image/`), Deployment/E2E
   (`deploy/`), Packaging (`packaging/debian/`, `packaging/systemd/`) und Tests
   (`scripts/tests/`); dazu `LICENSES/GPL-3.0-or-later.txt`, `renovate.json`,
