@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Self-hosted Renovate — so digest bumps work without depending on the org-level
+# Renovate/Mend GitHub App. Runs weekly and on demand. It opens PRs that bump the
+# @sha256 pins (the data-plane image DEFAULT_IMAGE via the customManager in
+# renovate.json, plus every Dockerfile / docker-compose image) — a human MUST
+# merge them (packageRules automerge:false); merging feeds a new .deb release.
+#
+# TOKEN: uses a RENOVATE_TOKEN repo secret (a fine-grained/classic PAT with
+# contents+pull-requests write) if present, else falls back to the built-in
+# GITHUB_TOKEN. A PAT is RECOMMENDED so the CI workflows actually run on Renovate's
+# PRs (PRs created with GITHUB_TOKEN do not trigger other workflows).
+
+name: Renovate
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # every Monday 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: "Dry run (extract + plan, open NO PRs)"
+        type: boolean
+        default: false
+      logLevel:
+        description: "Renovate log level"
+        type: choice
+        default: "info"
+        options: ["info", "debug"]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Renovate
+        uses: renovatebot/github-action@v41.0.8
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN || github.token }}
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_PLATFORM: github
+          RENOVATE_ONBOARDING: "false" # renovate.json already present -> no onboarding PR
+          RENOVATE_DRY_RUN: ${{ inputs.dryRun == true && 'full' || '' }}
+          LOG_LEVEL: ${{ inputs.logLevel || 'info' }}

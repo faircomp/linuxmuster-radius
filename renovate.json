@@ -2,9 +2,24 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "docker:pinDigests"],
   "docker-compose": { "enabled": true },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Bump the digest-pinned data-plane image (DEFAULT_IMAGE) in the control-plane code and the deploy examples. The reference is digest-only (@sha256:...), so we tell Renovate which tag's digest to follow via currentValueTemplate (the rolling :latest tag published by build-image).",
+      "managerFilePatterns": [
+        "/^controlplane/lmnradius/models\\.py$/",
+        "/^deploy/instances/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>ghcr\\.io/faircomp/linuxmuster-radius)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker",
+      "currentValueTemplate": "latest"
+    }
+  ],
   "packageRules": [
     {
-      "description": "Data-plane image: pin + update by immutable digest. A human MUST merge (never auto-apply to a school's proxy).",
+      "description": "Data-plane image: pin/update by immutable digest only. A human MUST merge (never auto-apply a new image to a school's live RADIUS).",
       "matchDatasources": ["docker"],
       "pinDigests": true,
       "automerge": false
