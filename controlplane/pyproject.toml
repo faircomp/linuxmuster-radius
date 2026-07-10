@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lmnradius"
+version = "0.1.0"
+description = "REST API + CLI managing the FreeRADIUS WLAN control plane"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Kevin Stenzel", email = "kevin@ks98.de" }]
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "docker>=7",
+    "pydantic>=2",
+    "pydantic-settings",
+    "pyyaml",
+    "typer",
+    "httpx",
+]
+
+[project.urls]
+Homepage = "https://github.com/faircomp/linuxmuster-radius"
+Repository = "https://github.com/faircomp/linuxmuster-radius"
+Issues = "https://github.com/faircomp/linuxmuster-radius/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+    "types-PyYAML",
+]
+
+[project.scripts]
+lmnradius-api = "lmnradius.main:main"
+lmnradius = "lmnradius.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["lmnradius*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["docker", "docker.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

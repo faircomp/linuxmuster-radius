@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# --- Secrets (NEVER commit) ---
+deploy/secrets/*.keytab
+deploy/secrets/krb5.conf
+deploy/**/ssl_db/
+**/*.keytab
+.claude/settings.local.json
+.claude/*.lock
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+build/
+
+# --- Debian packaging build artifacts ---
+debian/.debhelper/
+debian/files
+debian/*.substvars
+debian/linuxmuster-squid/
+*.deb
+*.buildinfo
+*.changes
+
+# --- crabbox test state/captures ---
+.crabbox/
+
+# --- Editor / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store

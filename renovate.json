@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "docker:pinDigests"],
+  "docker-compose": { "enabled": true },
+  "packageRules": [
+    {
+      "description": "Data-plane image: pin + update by immutable digest. A human MUST merge (never auto-apply to a school's proxy).",
+      "matchDatasources": ["docker"],
+      "pinDigests": true,
+      "automerge": false
+    }
+  ]
+}
