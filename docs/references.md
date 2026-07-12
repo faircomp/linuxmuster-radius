@@ -172,3 +172,23 @@ belegt, nicht angenommen:
   Re-Join bei Verlust) — Abweichung vom stateless Keytab-Modell von linuxmuster-squid. (high)
 - ⚠️ Die Zeile `ntlm auth = mschapv2-and-ntlmv2-only` lebt in der **DC-`smb.conf`** und
   wird von Paket-Updates gelegentlich entfernt → nach Updates prüfen. (medium)
+
+## Empirisch verifiziert an echter linuxmuster (2026-07-12, `EVSVBZ.ORG`, linuxmuster-base7 7.3.36)
+
+Read-only gegen einen produktiven linuxmuster-Server geprüft (noch ohne Container/Join):
+- `discover-ad-facts.sh` erkennt realm/workgroup/Base-DN/Bind-DN/Gruppen korrekt; der
+  `[OK]`-Check für `ntlm auth = mschapv2-and-ntlmv2-only` griff (war gesetzt). (verifiziert)
+- **LDAPS-Bind als `global-binduser` funktioniert** (extern, `require_cert=allow`); die
+  Gruppe `teachers` liegt unter `OU=Teachers,OU=default-school,OU=SCHOOLS,DC=…`. (verifiziert)
+- **Gruppenmodell der WLAN-User:** ein Lehrer ist memberOf `teachers` **und** `role-teacher`
+  (+ `sophomorixRole=teacher`); ein `schooladministrator` ist in `wifi`, aber **weder**
+  `teachers` **noch** `students` (memberOf `role-schooladministrator`, `admins`, …). → Das
+  Per-SSID-Gate auf `Ldap-Group == teachers/students` trifft Lehrer/Schüler korrekt, **lässt
+  aber schooladministrator/examuser durchfallen** (würde abgewiesen). (verifiziert)
+- **Design-Konsequenz (offen):** vollständigere Gate-Signale sind die `role-<rolle>`-Gruppen
+  bzw. das Attribut `sophomorixRole` — je nachdem, ob Admins/Examuser WLAN bekommen sollen.
+  Pro Einsatz zu entscheiden. (offen)
+- `all-*`/`global-*` sind **schulübergreifende Aggregatgruppen**, keine Schulen (discover-Skript
+  korrigiert). (verifiziert)
+- **Noch NICHT verifiziert:** Laufzeit-Join + PEAP-MSCHAPv2 via winbind/ntlm_auth (braucht eine
+  Docker-VM mit DC-Sicht + ein Test-Konto). (offen)

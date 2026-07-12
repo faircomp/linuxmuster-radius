@@ -94,11 +94,18 @@ schools_of() {
     printf '%s\n' "$ROLE_GROUPS" | while IFS= read -r g; do
         [ -n "$g" ] || continue
         case "$g" in
+            all-teachers|all-students|global-teachers|global-students) : ;;  # Aggregatgruppen, keine Schule
             *-teachers) printf '%s\n' "${g%-teachers}" ;;
             *-students) printf '%s\n' "${g%-students}" ;;
             teachers|students) printf '%s\n' "default-school" ;;
         esac
     done | sort -u
+}
+
+# Aggregat-Rollengruppen (schulübergreifend: all-*/global-*) — keine eigene Schule.
+# (Verifiziert an echter linuxmuster: 'all-teachers'/'global-teachers' sind reserviert.)
+aggregates_of() {
+    printf '%s\n' "$ROLE_GROUPS" | grep -E '^(all|global)-(teachers|students)$' | sort -u
 }
 
 group_present() { printf '%s\n' "$ROLE_GROUPS" | grep -Fxq "$1"; }
@@ -144,6 +151,12 @@ else
             esac
         done
     done
+fi
+AGG="$(aggregates_of)"
+if [ -n "$AGG" ]; then
+    echo "  Aggregat-Rollengruppen (schulübergreifend, KEINE eigene Schule):"
+    printf '%s\n' "$AGG" | sed 's/^/    - /'
+    echo "    (nutzbar für EIN übergreifendes WLAN statt pro Schule — bewusst wählen; kein Skeleton.)"
 fi
 echo
 
