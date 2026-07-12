@@ -26,8 +26,13 @@ server inner-tunnel {
 	authorize {
 		filter_username
 
-		#  &Called-Station-SSID arrives here from the outer request
-		#  (copy_request_to_tunnel = yes), ready for the post-auth SSID gate.
+		#  RFC 3580: the AP's Called-Station-Id ("<AP-MAC>:<SSID>") was copied
+		#  verbatim into this tunnel by copy_request_to_tunnel (mods/eap). Split it
+		#  HERE (not in the outer server): &Called-Station-SSID is a FreeRADIUS-
+		#  internal attribute, which copy_request_to_tunnel does NOT carry across the
+		#  tunnel boundary -- so it must be (re)created inside the tunnel, where the
+		#  post-auth per-SSID gate reads it. (Verified against a real DC, 2026-07-12.)
+		rewrite_called_station_id
 
 		#  Sets Auth-Type for a direct MSCHAP inner exchange, if any.
 		chap

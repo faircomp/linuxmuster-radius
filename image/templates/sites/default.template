@@ -9,12 +9,17 @@
 # each sending from its own IP). Under PEAP the OUTER identity is anonymous, so
 # the REAL user authentication AND the per-SSID group gate happen in the
 # "inner-tunnel" server (see mods/eap -> peap -> virtual_server, and
-# sites/inner-tunnel). Here we only:
-#   1. normalise Called-Station-Id -> &Called-Station-SSID
-#      (policy rewrite_called_station_id, from policy.d/canonicalization),
-#      BEFORE eap, so copy_request_to_tunnel carries the SSID into the tunnel;
-#   2. run eap, which builds the PEAP tunnel and dispatches the inner
-#      EAP-MSCHAPv2 to the inner-tunnel server.
+# sites/inner-tunnel). Here we only run eap, which builds the PEAP tunnel and
+# dispatches the inner EAP-MSCHAPv2 to the inner-tunnel server.
+#
+# NB: Called-Station-Id is deliberately NOT rewritten out here. copy_request_to_tunnel
+# (mods/eap) copies real RADIUS attributes into the tunnel but NOT FreeRADIUS-internal
+# ones, and &Called-Station-SSID is internal -- deriving it here never reaches the inner
+# ssid-policy (verified against a real DC, 2026-07-12: eapol_test showed the inner got
+# Called-Station-Id but no Called-Station-SSID -> the gate hit "else { reject }"). We
+# therefore leave Called-Station-Id intact ("<AP-MAC>:<SSID>") so its FULL value is copied
+# into the tunnel, and run rewrite_called_station_id in inner-tunnel authorize, which
+# recreates &Called-Station-SSID right where the per-SSID gate needs it.
 #
 # This file is passed through the entrypoint's envsubst step for a uniform
 # render pipeline; the outer server is STATIC and substitutes no instance
@@ -39,11 +44,10 @@ server default {
 		#  Reject User-Names with invalid characters early.
 		filter_username
 
-		#  RFC 3580: UniFi sends Called-Station-Id = "<AP-MAC>:<SSID>". This
-		#  policy splits it and creates &Called-Station-SSID, which the inner
-		#  tunnel branches on for the per-SSID group gate. It MUST run before eap
-		#  so copy_request_to_tunnel = yes carries the SSID into the tunnel.
-		rewrite_called_station_id
+		#  NOTE: Called-Station-Id is intentionally left untouched here (see the
+		#  header). It is copied verbatim ("<AP-MAC>:<SSID>", RFC 3580) into the PEAP
+		#  tunnel, where inner-tunnel authorize runs rewrite_called_station_id to
+		#  derive &Called-Station-SSID for the per-SSID gate.
 
 		#  Set Auth-Type if a client ever sends CHAP/MS-CHAP directly. For PEAP
 		#  these are no-ops on the anonymous outer request.
