@@ -190,5 +190,33 @@ Read-only gegen einen produktiven linuxmuster-Server geprüft (noch ohne Contain
   Pro Einsatz zu entscheiden. (offen)
 - `all-*`/`global-*` sind **schulübergreifende Aggregatgruppen**, keine Schulen (discover-Skript
   korrigiert). (verifiziert)
-- **Noch NICHT verifiziert:** Laufzeit-Join + PEAP-MSCHAPv2 via winbind/ntlm_auth (braucht eine
-  Docker-VM mit DC-Sicht + ein Test-Konto). (offen)
+
+### Voller Laufzeit-Test: Container-Join + PEAP-MSCHAPv2 gegen den echten DC (2026-07-12)
+
+In einer Wegwerf-VM mit DC-Sicht (Docker, `--dns` auf den DC) wurde das gebaute Image mit
+temporären Test-Konten end-to-end geprüft. Der Test deckte fünf Laufzeit-Bugs auf, die
+`radiusd -XC` und statische Reviews **nicht** finden konnten — alle behoben und re-verifiziert:
+
+- **Join als Member funktioniert**, aber nur mit einem **Admin-/delegierten Konto** (`JOIN_SECRET`):
+  ein einfacher Benutzer scheitert mit `Insufficient access`. Ausserdem: `net ads join` darf
+  **kein** `MEMBER`-Positional bekommen (das ist `net rpc join`), und `kerberos method = secrets
+  only` ist nötig, sonst schlägt der Join am schreibgeschützten `/etc/krb5.keytab` fehl. (verifiziert)
+- **`rlm_ldap` über `ldaps://` bringt den *threaded* Server zum Absturz** (libldap=GnuTLS vs.
+  FreeRADIUS=OpenSSL) — Sekunden nach „Ready to process requests". Fix: LDAP-TLS in einem lokalen
+  **stunnel** terminieren (`rlm_ldap` → Klartext `127.0.0.1` → stunnel/OpenSSL → DC:636). (verifiziert)
+- **Supervisor riss gesunde Container ab:** `kill -0` auf den `freerad`-eigenen radiusd gibt unter
+  `--cap-drop ALL` (kein `CAP_KILL`) `EPERM` = „tot". Fix: Liveness über `/proc/<pid>`. (verifiziert)
+- **`Called-Station-SSID` erreichte den PEAP-Tunnel nicht** (interne Attribute werden von
+  `copy_request_to_tunnel` nicht übertragen). Fix: `rewrite_called_station_id` im *inner-tunnel*
+  ausführen (das volle `Called-Station-Id` wird kopiert). (verifiziert)
+- **`wbinfo -t` gegen den echten DC: „RPC calls succeeded".** (verifiziert)
+
+Auth-Matrix (winbind `ntlm_auth`, echte Konten): Lehrer in `wifi` + richtiges PW → `NT_STATUS_OK`;
+falsches PW → `NT_STATUS_WRONG_PASSWORD`; Konto **nicht** in `wifi` → `NT_STATUS_LOGON_FAILURE`
+(wifi-Gate greift). (verifiziert)
+
+Voller PEAP-Handshake (`eapol_test`, echter Lehrer): Server-Cert validiert, inner MSCHAPv2 gegen
+den DC erfolgreich, und auf SSID `…-Lehrer` → **Access-Accept mit `Tunnel-Private-Group-Id=20`**
+(Tunnel-Type=VLAN, Medium=IEEE-802). Lehrer auf `…-Schueler` (Rollen-Gate) und unbekannte SSID →
+**Reject**. Die komplette Kette EAP-Cert → PEAP → winbind → `rlm_ldap`-Gruppen-Gate → VLAN ist
+damit gegen einen echten linuxmuster-DC bestätigt. (verifiziert)

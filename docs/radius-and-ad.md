@@ -122,8 +122,11 @@ die Authentifizierung selbst — die läuft über winbind (§ 1).
   (eine Zeile, kein Zeilenumbruch). Es wird als Secret **`LDAP_BIND_SECRET`** (§ 6) auf
   die RADIUS-VM übertragen; der Entrypoint liest den Wert in `LDAP_BIND_PW` und rendert
   ihn in das `ldap`-Modul (`0640`, `freerad`) — nie in Env oder Log.
-- **Transport:** `ldaps://<dc>` (LDAPS); der Gruppencheck ist rekursiv. Die per-SSID-
-  Verzweigung (`Called-Station-SSID` → geforderte Gruppe) beschreibt ADR-007.
+- **Transport:** Der Operator setzt `ldaps://<dc>`; intern spricht `rlm_ldap` jedoch
+  Klartext-LDAP zu einem **lokalen stunnel**, das die TLS-Verbindung zum DC terminiert
+  (der `libldap`-GnuTLS-vs-OpenSSL-Crash im threaded Server, ADR-015). Der Gruppencheck
+  ist rekursiv. Die per-SSID-Verzweigung (`Called-Station-SSID` → geforderte Gruppe)
+  beschreibt ADR-007 (Ableitung im inner-tunnel).
 
 ## 4. DC-seitige Voraussetzung — `ntlm auth`
 

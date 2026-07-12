@@ -69,9 +69,11 @@ die Entscheidungen mit Begründung und verworfenen Alternativen: `docs/decisions
   Secret im `/var/lib/samba`-Volume; bei Verlust Re-Join) und fügt `winbindd` als
   zweiten Daemon hinzu — eine Abkehr vom zustandslosen Keytab-Modell von squid.
 - **SSIDs als Config:** die Policy `rewrite_called_station_id` zerlegt die
-  `Called-Station-Id` in **`Called-Station-SSID`**; darauf wird verzweigt.
+  `Called-Station-Id` in **`Called-Station-SSID`** — **im inner-tunnel**, weil
+  `copy_request_to_tunnel` interne Attribute nicht überträgt (ADR-007); darauf wird verzweigt.
 - **Per-SSID-Gruppen-Gate:** je SSID eine Zielgruppe, geprüft über `rlm_ldap`
-  (rekursiv, Bind als `global-binduser`): `<schule>-lehrer` → `<schule>-teachers`,
+  (rekursiv, Bind als `global-binduser`; dessen LDAP-TLS terminiert ein lokales
+  **stunnel** zum DC, ADR-015): `<schule>-lehrer` → `<schule>-teachers`,
   `<schule>-schueler` → `<schule>-students`, sonst Access-Reject. `ntlm_auth
   --require-membership-of` allein reicht nicht — es prüft **genau eine** Gruppe.
 - **VLAN:** Default ist das **statische VLAN je SSID** im UniFi-Profil (SSID = Rolle
@@ -193,13 +195,14 @@ image:         ghcr.io/faircomp/linuxmuster-radius@sha256:<digest>   # optional,
 3. **Innerer MSCHAPv2:** `mschap` → `ntlm_auth --request-nt-key --allow-mschapv2`
    → `winbindd` → der AD DC prüft den **NT-Hash** (keine Passwörter/Hashes auf der
    RADIUS-VM).
-4. **`rewrite_called_station_id`** zerlegt die `Called-Station-Id`
-   (`<AP-MAC>:<SSID>`) und legt **`Called-Station-SSID`** an.
+4. **`rewrite_called_station_id`** (im **inner-tunnel**, da `copy_request_to_tunnel`
+   das interne `Called-Station-SSID` nicht mitkopiert) zerlegt das kopierte
+   `Called-Station-Id` (`<AP-MAC>:<SSID>`) und legt **`Called-Station-SSID`** an.
 5. **Branch** auf `Called-Station-SSID` (virtual-server / `unlang`) → geforderte
    Gruppe je SSID (aus `ssids[].allowed_group`).
-6. **Gruppen-Gate** via `rlm_ldap` (Bind als `global-binduser` über **LDAPS**,
-   rekursiv): Mitglied der geforderten Rollengruppe **und** der Sophomorix-Gruppe
-   `wifi`?
+6. **Gruppen-Gate** via `rlm_ldap` (Bind als `global-binduser`, rekursiv); dessen
+   LDAP-TLS terminiert ein lokales **stunnel** zum DC (ADR-015): Mitglied der
+   geforderten Rollengruppe **und** der Sophomorix-Gruppe `wifi`?
 7. **Ergebnis:** **Access-Accept** (Auth ok **und** Gruppe ok) bzw.
    **Access-Reject** (falsches Passwort, falsche SSID/Rolle, nicht in `wifi`).
 8. **VLAN:** Default = statisches VLAN je SSID im UniFi-Profil; optional trägt der

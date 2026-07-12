@@ -123,7 +123,13 @@ mehrere SSIDs mit **je eigener** Gruppenregel bedienen. **Verworfene Alternative
 `ntlm_auth --require-membership-of` allein — prüft **genau EINE** Gruppe und kann das
 Per-SSID-Mapping nicht ausdrücken. **Quelle:** `ntlm_auth(1)` /
 Samba-`--require-membership-of` (Ein-Gruppen-Grenze); FreeRADIUS-Policy
-`rewrite_called_station_id`. **E2E:** Proof-Matrix (Lehrer/Schüler × SSID) auf crabbox.
+`rewrite_called_station_id`. **E2E (verifiziert 2026-07-12):** Proof-Matrix bestätigt
+(Lehrer auf `…-Lehrer` → Access-Accept + `Tunnel-Private-Group-Id=20`; Lehrer auf
+`…-Schueler` bzw. unbekannte SSID → Reject). **Korrektur aus dem E2E:**
+`rewrite_called_station_id` läuft im **inner-tunnel**, nicht im äusseren Server:
+`&Called-Station-SSID` ist ein FreeRADIUS-**internes** Attribut, das
+`copy_request_to_tunnel` **nicht** über die Tunnelgrenze trägt — es muss dort (neu)
+erzeugt werden, wo das Post-Auth-Gate es liest.
 
 ### ADR-008 — VLAN-Zuweisung
 **Status:** Accepted (Default; dynamischer Modus optional). **Entscheidung:** Default
@@ -203,6 +209,22 @@ und Zertifikatsverwaltung auf dem NAS-Pfad hinzu. **Verworfene Alternative:** Ra
 im MVP erzwingen — setzt UniFi Network ≥ 8.4 flottenweit voraus und erhöht die
 Komplexität ohne unmittelbaren Bedarf. **Quelle:** Ubiquiti UniFi Network Release
 Notes (RadSec ab 8.4, TCP/2083, Secret `radsec`).
+
+### ADR-015 — LDAP-TLS via lokalem stunnel (nicht `rlm_ldap`-eigenes LDAPS)
+**Status:** Accepted (im Live-E2E gegen einen echten DC verifiziert, 2026-07-12).
+**Entscheidung:** `rlm_ldap` spricht **Klartext-LDAP** zu einem **lokalen stunnel** auf
+`127.0.0.1`; stunnel (OpenSSL) re-verschlüsselt zum DC (`ldaps://…:636`). `libldap`
+initialisiert damit **nie** TLS im radiusd-Prozess. **Begründung:** Auf Ubuntu ist
+`libldap` gegen **GnuTLS** gebaut, FreeRADIUS gegen **OpenSSL**; sobald `rlm_ldap` im
+**threaded** Server eine LDAPS/StartTLS-Verbindung öffnet, kollidieren beide TLS-Stacks
+und radiusd **segfaultet** Sekunden nach „Ready to process requests" (die Stock-Warnung
+„libldap is using GnuTLS … The server may also crash"). Der Klartext-Hop ist
+loopback-only im Netzwerk-Namespace des Containers; die Wire-Verschlüsselung zum DC bleibt
+erhalten. **Verworfene Alternativen:** (a) `libldap` gegen OpenSSL neu bauen — eigenes
+Paket pflegen; (b) GSSAPI-Bind über Klartext — Kerberos-ccache-Lebenszyklus; (c) `rlm_ldap`
+weglassen — das Per-SSID-Rollen-Gate braucht die AD-Gruppen. Optional verifiziert stunnel
+das DC-Zertifikat gegen eine gemountete CA (`LDAP_CA`). **Quelle:** FreeRADIUS-Wiki
+„Rlm_ldap" (GnuTLS-vs-OpenSSL-Warnung); reproduziert + behoben im Live-E2E (references.md).
 
 ---
 
