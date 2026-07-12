@@ -42,6 +42,8 @@ set -eu
 : "${SERVICE_USER:=freerad}"             # the user radiusd drops to (Ubuntu default)
 : "${WINBIND_WAIT:=60}"                  # bounded winbind-trust wait, in seconds
 : "${HEALTHCHECK_SECRET:=lmnradius-loopback}"  # loopback Status-Server probe secret
+: "${LDAP_CA:=}"                         # optional: PEM CA to verify the DC's LDAPS cert (stunnel)
+: "${LDAP_STUNNEL_PORT:=3890}"           # loopback port where stunnel exposes plaintext LDAP
 
 RUN=/run/lmnradius
 BAKED=/etc/freeradius/3.0
@@ -78,6 +80,15 @@ copy_secret() {
 # FreeRADIUS %{...} expansions and unlang ${...} config references survive untouched.
 render() { envsubst "${ALLOW}" < "$1" > "$2"; }
 
+# alive PID — true while process PID exists, WITHOUT signalling it. `kill -0` is unusable
+# for daemon liveness here: radiusd drops to ${SERVICE_USER}, and the hardened run profile
+# drops CAP_KILL, so the root entrypoint's `kill -0` on the freerad-owned radiusd returns
+# EPERM (indistinguishable from "dead") even while it is running — which made the
+# supervisor tear a perfectly healthy container down. Reading /proc/<pid> needs no signal
+# and no capability. (Verified under --cap-drop ALL against a real Samba AD member,
+# 2026-07-12.)
+alive() { [ -e "/proc/$1" ]; }
+
 # ---- writable directories (tmpfs on a read-only rootfs) ----
 mkdir -p "${RUN}/eap" "${RADDB}" "${RUN}/log/radacct" "${RUN}/run" \
          /run/samba "${PRIV_DIR}" "${STATEDIR}/private"
@@ -85,8 +96,8 @@ mkdir -p "${RUN}/eap" "${RADDB}" "${RUN}/log/radacct" "${RUN}/run" \
 # ---- Kerberos + LDAP client env ----
 # rdns / dns_canonicalize_hostname off so the DC principal is taken literally (via SRV),
 # not via reverse DNS. ccache + replay cache onto tmpfs so a read-only rootfs cannot
-# break the join. SASL_NOCANON keeps rlm_ldap's GSSAPI/LDAPS bind from reverse-DNS'ing
-# the DC name.
+# break the join. SASL_NOCANON keeps the `net ads` GSSAPI bind (during the join) from
+# reverse-DNS'ing the DC name. (rlm_ldap itself binds simple over the stunnel loopback.)
 export KRB5_CONFIG="${RUN}/krb5.conf"
 export KRB5CCNAME="FILE:${RUN}/krb5cc_${INSTANCE}"
 export KRB5RCACHEDIR="${RUN}"
@@ -118,20 +129,80 @@ copy_secret "${JOIN_SECRET}" "${JOIN_AUTH_FILE}" 0600 root:root
 # lowercase DNS form of the realm (krb5.conf [realms]/[domain_realm]).
 DNS_DOMAIN="$(printf '%s' "${REALM}" | tr '[:upper:]' '[:lower:]')"
 
+# ---- LDAP transport: route ldaps:// through a local stunnel (GnuTLS/OpenSSL fix) ----
+# On Ubuntu, libldap is built against GnuTLS while FreeRADIUS links OpenSSL; when
+# rlm_ldap opens an LDAPS/StartTLS connection in the THREADED server the two TLS stacks
+# collide and radiusd segfaults seconds after "Ready to process requests" (reproduced
+# against a real Samba AD DC, 2026-07-12). So rlm_ldap ALWAYS talks plaintext LDAP, and
+# when LDAP_SERVER is ldaps:// we terminate TLS in a local stunnel on the loopback and
+# point rlm_ldap at it. libldap never touches TLS -> the conflict cannot happen.
+STUNNEL_LDAP_CONF=""                       # non-empty => a tunnel must be started + supervised
+LDAP_SERVER_EFFECTIVE="${LDAP_SERVER}"
+_scheme="$(printf '%s' "${LDAP_SERVER}" | sed -n 's|^\([A-Za-z][A-Za-z0-9+.-]*\)://.*|\1|p' | tr '[:upper:]' '[:lower:]')"
+case "${_scheme}" in
+  ldaps)
+    # Only a single ldaps:// URL is wrapped (linuxmuster is a single DC); a
+    # space-separated server list is not supported by the TLS shim.
+    if printf '%s' "${LDAP_SERVER}" | grep -q ' '; then
+        echo "FATAL: LDAP_SERVER lists multiple servers; the stunnel TLS shim supports a single ldaps:// DC only." >&2
+        exit 1
+    fi
+    _hostport="$(printf '%s' "${LDAP_SERVER}" | sed -e 's|^[A-Za-z][A-Za-z0-9+.-]*://||' -e 's|/.*$||')"
+    _dchost="${_hostport%%:*}"
+    _dcport="${_hostport##*:}"
+    [ "${_dcport}" = "${_hostport}" ] && _dcport=636   # no explicit port -> LDAPS default
+    [ -n "${_dchost}" ] || { echo "FATAL: could not parse a host from LDAP_SERVER='${LDAP_SERVER}'." >&2; exit 1; }
+    STUNNEL_LDAP_CONF="${RUN}/stunnel-ldap.conf"
+    LDAP_SERVER_EFFECTIVE="ldap://127.0.0.1:${LDAP_STUNNEL_PORT}"
+    # stunnel client config on tmpfs. Verify the DC cert only when a CA is mounted
+    # (LDAP_CA); otherwise connect without verification, matching the prior rlm_ldap
+    # 'require_cert = allow' posture on the trusted RADIUS<->DC link. Empty pid = no
+    # pidfile (read-only rootfs); foreground + syslog=no => logs go to stderr.
+    {
+        printf 'foreground = yes\n'
+        printf 'pid =\n'
+        printf 'syslog = no\n'
+        printf 'sslVersionMin = TLSv1.2\n'
+        printf '[ldap]\n'
+        printf 'client = yes\n'
+        printf 'accept = 127.0.0.1:%s\n' "${LDAP_STUNNEL_PORT}"
+        printf 'connect = %s:%s\n' "${_dchost}" "${_dcport}"
+        if [ -n "${LDAP_CA}" ] && [ -r "${LDAP_CA}" ]; then
+            printf 'CAfile = %s\n' "${LDAP_CA}"
+            printf 'verifyChain = yes\n'
+            printf 'checkHost = %s\n' "${_dchost}"
+        elif [ -n "${LDAP_CA}" ]; then
+            echo "WARN: LDAP_CA='${LDAP_CA}' is set but not readable; connecting to the DC WITHOUT certificate verification." >&2
+        fi
+    } > "${STUNNEL_LDAP_CONF}"
+    echo "linuxmuster-radius: LDAPS to ${_dchost}:${_dcport} is tunnelled via stunnel on 127.0.0.1:${LDAP_STUNNEL_PORT}." >&2
+    ;;
+  ldap|"")
+    : # plaintext LDAP straight through; libldap does no TLS, so there is no crash
+    ;;
+  *)
+    echo "WARN: unrecognised LDAP_SERVER scheme '${_scheme}'; passing it through unchanged (no stunnel)." >&2
+    ;;
+esac
+
 # ---- render env-driven config from templates ----
 export INSTANCE REALM WORKGROUP SERVER_FQDN DNS_DOMAIN SMB_CONF
-export LDAP_SERVER LDAP_BASE_DN LDAP_BIND_DN LDAP_BIND_PW WIFI_GROUP
+export LDAP_SERVER_EFFECTIVE LDAP_BASE_DN LDAP_BIND_DN LDAP_BIND_PW WIFI_GROUP
 export EAP_CA EAP_CERT EAP_KEY
 # The single quotes are intentional: envsubst needs the literal ${VAR} tokens as its
 # allow-list argument, so the shell must NOT expand them here.
 # shellcheck disable=SC2016
-ALLOW='${INSTANCE} ${REALM} ${WORKGROUP} ${SERVER_FQDN} ${DNS_DOMAIN} ${SMB_CONF} ${LDAP_SERVER} ${LDAP_BASE_DN} ${LDAP_BIND_DN} ${LDAP_BIND_PW} ${WIFI_GROUP} ${EAP_CA} ${EAP_CERT} ${EAP_KEY}'
+ALLOW='${INSTANCE} ${REALM} ${WORKGROUP} ${SERVER_FQDN} ${DNS_DOMAIN} ${SMB_CONF} ${LDAP_SERVER_EFFECTIVE} ${LDAP_BASE_DN} ${LDAP_BIND_DN} ${LDAP_BIND_PW} ${WIFI_GROUP} ${EAP_CA} ${EAP_CERT} ${EAP_KEY}'
 
 render "${TPL}/smb.conf.template"  "${SMB_CONF}"
 render "${TPL}/krb5.conf.template" "${KRB5_CONFIG}"
 
 # ---- assemble the FreeRADIUS config tree on tmpfs ----
-cp -a "${BAKED}/." "${RADDB}/"
+# -dR --preserve=mode (NOT `cp -a`): the hardened run profile drops CAP_FOWNER, so a
+# preserve-all copy that chowns files to freerad can no longer chmod/utime them
+# ("Operation not permitted"). We keep symlinks + mode only; the chown to the service
+# user happens once, below. (Verified against a real Samba AD member, 2026-07-12.)
+cp -dR --preserve=mode "${BAKED}/." "${RADDB}/"
 rm -rf "${RADDB}/templates"          # not needed inside the running tree
 # Repoint FreeRADIUS' writable dirs at tmpfs so a read-only rootfs cannot break it and
 # so ${confdir}/${raddbdir} resolve to the assembled tree (not the read-only /etc copy).
@@ -174,7 +245,11 @@ if [ -f "${MOUNT_D}/clients.conf" ]; then
 fi
 
 # Loopback client for the healthcheck Status-Server probe + optional include of the
-# mounted AP clients. Appended to the assembled clients.conf (loaded by radiusd.conf).
+# mounted AP clients. We OVERWRITE (not append to) the assembled clients.conf: the stock
+# file already defines a `client localhost` on 127.0.0.1, and FreeRADIUS refuses a second
+# client on the same IP ("Failed to add duplicate client"). The stock localhost/example
+# clients are not needed — the real NAS clients come from instance.d/clients.conf.
+# (Verified against a real Samba AD member, 2026-07-12.)
 {
     printf 'client healthcheck-loopback {\n'
     printf '    ipaddr = 127.0.0.1\n'
@@ -185,23 +260,27 @@ fi
     printf '}\n'
     # shellcheck disable=SC2016
     printf '$-INCLUDE ${confdir}/instance.d/clients.conf\n'
-} >> "${RADDB}/clients.conf"
+} > "${RADDB}/clients.conf"
 
-# radiusd reads config as root then drops to ${SERVICE_USER}; it must own the tmpfs
-# config + the writable log/run dirs. The rendered ldap mod carries the bind password.
-chown -R "${SERVICE_USER}:${SERVICE_USER}" "${RADDB}" "${RUN}/log" "${RUN}/run"
+# The rendered ldap mod carries the bind password — restrict it BEFORE the chown, while
+# it is still root-owned: the hardened profile drops CAP_FOWNER, so root cannot chmod a
+# file once chown has handed it to freerad. radiusd reads config as root then drops to
+# ${SERVICE_USER}, which must own the tmpfs config + the writable log/run dirs.
 chmod 0640 "${RADDB}/mods-enabled/ldap"
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "${RADDB}" "${RUN}/log" "${RUN}/run"
 
 # ---- domain join (member) — only if not already joined ----
 # net ads testjoin verifies the machine secret + secure channel WITHOUT winbindd. A
-# populated /var/lib/samba volume => already joined => never re-join. 'net ads join
-# MEMBER' adopts the pre-created computer account (the linuxmuster devices.csv +
-# linuxmuster-import-devices path) instead of creating a fresh one.
+# populated /var/lib/samba volume => already joined => never re-join. 'net ads join'
+# joins as a MEMBER by default; the -A authfile supplies a join-capable account. A
+# pre-created computer account (the linuxmuster devices.csv path) is adopted by name —
+# there is NO 'MEMBER' positional for 'net ads' (that is 'net rpc join'), and passing it
+# makes net treat MEMBER as the domain. (Verified against a real Samba AD, 2026-07-12.)
 if net ads testjoin --configfile="${SMB_CONF}" >/dev/null 2>&1; then
     echo "linuxmuster-radius: already joined to ${REALM} (machine secret present)." >&2
 else
     echo "linuxmuster-radius: joining ${REALM} as a member (one-time)..." >&2
-    net ads join MEMBER --configfile="${SMB_CONF}" -A "${JOIN_AUTH_FILE}"
+    net ads join --configfile="${SMB_CONF}" -A "${JOIN_AUTH_FILE}"
     echo "linuxmuster-radius: domain join completed." >&2
 fi
 
@@ -234,7 +313,7 @@ WB=$!
 
 _waited=0
 until wbinfo -t >/dev/null 2>&1; do
-    if ! kill -0 "${WB}" 2>/dev/null; then
+    if ! alive "${WB}"; then
         echo "FATAL: winbindd exited before the trust to ${REALM} came up." >&2
         exit 1
     fi
@@ -248,31 +327,67 @@ until wbinfo -t >/dev/null 2>&1; do
 done
 echo "linuxmuster-radius: winbind trust to ${REALM} is up." >&2
 
+# ---- start the LDAP TLS stunnel (only for ldaps://), BEFORE radiusd instantiates ----
+# rlm_ldap opens its connection pool the moment radiusd (or -XC) instantiates the module,
+# so the loopback tunnel must already be listening or those binds fail.
+STUN=""
+if [ -n "${STUNNEL_LDAP_CONF}" ]; then
+    stunnel4 "${STUNNEL_LDAP_CONF}" &
+    STUN=$!
+    if command -v ss >/dev/null 2>&1; then
+        _sw=0
+        until ss -Hltn 2>/dev/null | grep -qE "127\.0\.0\.1:${LDAP_STUNNEL_PORT}([^0-9]|\$)"; do
+            if ! alive "${STUN}"; then
+                echo "FATAL: stunnel exited before the LDAP tunnel on 127.0.0.1:${LDAP_STUNNEL_PORT} came up." >&2
+                kill "${WB}" 2>/dev/null || true
+                exit 1
+            fi
+            _sw=$((_sw + 1))
+            [ "${_sw}" -ge 15 ] && break
+            sleep 1
+        done
+    else
+        sleep 2
+        if ! alive "${STUN}"; then
+            echo "FATAL: stunnel exited immediately after start." >&2
+            kill "${WB}" 2>/dev/null || true
+            exit 1
+        fi
+    fi
+    echo "linuxmuster-radius: LDAP stunnel is listening on 127.0.0.1:${LDAP_STUNNEL_PORT}." >&2
+fi
+
 # ---- FreeRADIUS config check ----
 if ! "${RADIUSD}" -XC -d "${RADDB}" >/dev/null 2>&1; then
     echo "FATAL: FreeRADIUS configuration check ('radiusd -XC') failed; details:" >&2
     "${RADIUSD}" -XC -d "${RADDB}" >&2 || true
-    kill "${WB}" 2>/dev/null || true
+    kill "${WB}" ${STUN} 2>/dev/null || true
     exit 1
 fi
 
 echo "linuxmuster-radius: instance='${INSTANCE}' realm='${REALM}' fqdn='${SERVER_FQDN}' wifi-group='${WIFI_GROUP}'" >&2
 
-# ---- run radiusd + supervise both daemons ----
-# Two long-running daemons: if EITHER winbindd or radiusd dies, tear the other down and
-# exit non-zero so the orchestrator's restart policy (unless-stopped) recreates the
-# container — a dead auth backend must not linger behind a live listener. tini (PID 1)
-# forwards SIGTERM to this script; the trap forwards it to both daemons for a clean stop.
+# ---- run radiusd + supervise the daemons ----
+# Long-running daemons: winbindd, radiusd, and (for ldaps://) the LDAP stunnel. If ANY of
+# them dies, tear the container down and exit non-zero so the orchestrator's restart policy
+# (unless-stopped) recreates it — a dead auth backend or a dead LDAP tunnel must not linger
+# behind a live listener. Liveness is by /proc/<pid> (see alive()), never `kill -0`, because
+# radiusd runs as ${SERVICE_USER} and capless root cannot signal it.
+#
+# TEARDOWN model: we can signal winbindd + stunnel (root-owned), but NOT the freerad-owned
+# radiusd (no CAP_KILL). That is fine: exiting makes tini (PID 1) leave, the PID namespace
+# collapses, and the kernel SIGKILLs every remaining process (radiusd included). So we never
+# `wait` on radiusd — a kill we are not permitted to send would otherwise hang the teardown.
+# ${STUN} is empty when no tunnel is used, so it drops out of the unquoted expansions.
 "${RADIUSD}" -f -l stdout -d "${RADDB}" &
 RD=$!
 
-trap 'kill "${WB}" "${RD}" 2>/dev/null || true; exit 0' TERM INT
+trap 'kill "${WB}" ${STUN} 2>/dev/null || true; exit 0' TERM INT
 
-while kill -0 "${WB}" 2>/dev/null && kill -0 "${RD}" 2>/dev/null; do
+while alive "${WB}" && alive "${RD}" && { [ -z "${STUN}" ] || alive "${STUN}"; }; do
     sleep 5
 done
 
 echo "linuxmuster-radius: a core daemon exited; taking the container down for a restart." >&2
-kill "${WB}" "${RD}" 2>/dev/null || true
-wait "${RD}" 2>/dev/null || true
+kill "${WB}" ${STUN} 2>/dev/null || true
 exit 1

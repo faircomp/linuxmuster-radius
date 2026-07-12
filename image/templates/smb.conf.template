@@ -25,11 +25,14 @@
     realm = ${REALM}
     workgroup = ${WORKGROUP}
 
-    # Verify Kerberos tickets against secrets.tdb FIRST, then the system keytab.
-    # Required so the machine-account secret written by `net ads join` (persisted
-    # in the /var/lib/samba volume) is actually used. Samba's default is
-    # "secrets only". Ref: smbdotconf "kerberos method".
-    kerberos method = secrets and keytab
+    # winbind's ntlm_auth (MSCHAPv2) authenticates via the netlogon secure channel using
+    # the machine-account secret in secrets.tdb (persisted on the /var/lib/samba volume) —
+    # NOT a Kerberos keytab. 'secrets only' stores exactly that and, crucially, stops
+    # `net ads join` from writing a system keytab to the read-only rootfs
+    # (/etc/krb5.keytab -> "failed to create kerberos keytab"). RADIUS never accepts
+    # Kerberos service tickets, so no keytab is needed. (Verified against a real Samba
+    # AD member, 2026-07-12.)
+    kerberos method = secrets only
 
     # Accept bare usernames without a "DOMAIN\" prefix. EAP identities arrive as a
     # plain sAMAccountName, so winbind must map "user" -> ${WORKGROUP}\user;

@@ -38,6 +38,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 #       TLS plumbing for LDAPS to the DC and EAP cert handling.
 #   ldap-utils
 #       ldapsearch — bind-user / group-gate diagnostics.
+#   stunnel4
+#       Loopback TLS terminator for the LDAP link. On Ubuntu, libldap is built
+#       against GnuTLS while FreeRADIUS links OpenSSL; when rlm_ldap opens an
+#       LDAPS/StartTLS connection in the THREADED server the two TLS stacks collide
+#       and radiusd segfaults seconds after "Ready to process requests" (the
+#       "libldap is using GnuTLS ... The server may also crash" warning — reproduced
+#       against a real Samba AD DC, 2026-07-12). rlm_ldap therefore talks PLAINTEXT
+#       LDAP to stunnel on 127.0.0.1, and stunnel (OpenSSL) does the TLS to the DC —
+#       libldap never touches TLS, so the conflict cannot happen. See entrypoint.sh.
 #   tini
 #       PID 1 init; forwards signals to and reaps the supervised daemons.
 RUN apt-get update \
@@ -54,6 +63,7 @@ RUN apt-get update \
       openssl \
       ca-certificates \
       ldap-utils \
+      stunnel4 \
       tini \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p \
@@ -81,7 +91,8 @@ RUN set -eu; for b in \
       /usr/sbin/winbindd \
       /usr/bin/wbinfo \
       /usr/bin/radclient \
-      /usr/bin/envsubst ; do \
+      /usr/bin/envsubst \
+      /usr/bin/stunnel4 ; do \
       test -x "$b" || { echo "MISSING binary: $b" >&2; exit 1; }; \
     done
 

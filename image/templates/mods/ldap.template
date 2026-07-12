@@ -13,8 +13,17 @@
 # through winbind (see mods/mschap). Bind = the existing Sophomorix
 # 'global-binduser' -- never an admin account.
 #
+# TRANSPORT: rlm_ldap connects in PLAINTEXT to ${LDAP_SERVER_EFFECTIVE}. When the
+# operator's LDAP_SERVER is an ldaps:// URL, the entrypoint sets
+# ${LDAP_SERVER_EFFECTIVE} to a loopback endpoint (ldap://127.0.0.1:<port>) served
+# by a local stunnel that re-encrypts to the DC. This is deliberate: on Ubuntu
+# libldap uses GnuTLS while FreeRADIUS uses OpenSSL, and letting rlm_ldap itself do
+# LDAPS/StartTLS in the threaded server segfaults radiusd. TLS-on-the-wire is
+# therefore provided by stunnel, not by libldap (see entrypoint.sh + Dockerfile).
+# The plaintext hop is loopback-only, inside the container's own network namespace.
+#
 # envsubst allow-list (entrypoint):
-#   ${LDAP_SERVER} ${LDAP_BIND_DN} ${LDAP_BIND_PW} ${LDAP_BASE_DN}
+#   ${LDAP_SERVER_EFFECTIVE} ${LDAP_BIND_DN} ${LDAP_BIND_PW} ${LDAP_BASE_DN}
 # ${LDAP_BIND_PW} is injected by the entrypoint from the mounted secret file
 # $LDAP_BIND_SECRET (one line); the value is only ever written into this
 # rendered config on tmpfs, and is NEVER echoed or logged.
@@ -22,7 +31,7 @@
 # pass through envsubst unchanged.
 #
 ldap {
-	server = '${LDAP_SERVER}'
+	server = '${LDAP_SERVER_EFFECTIVE}'
 	identity = '${LDAP_BIND_DN}'
 	password = '${LDAP_BIND_PW}'
 	base_dn = '${LDAP_BASE_DN}'
@@ -47,19 +56,12 @@ ldap {
 		name_attribute = cn
 	}
 
-	tls {
-		#  ${LDAP_SERVER} is ldaps://dc.fqdn, so the whole connection is TLS.
-		#
-		#  HONEST LIMIT (P1): a Samba AD DC presents a certificate from its own
-		#  (or the linuxmuster) CA, which is NOT in the container's system trust
-		#  store, so strict validation fails unless that CA is mounted. On the
-		#  trusted RADIUS<->DC link we therefore default to 'allow' (connect even
-		#  if the DC cert can't be verified). To HARDEN, mount the DC CA and set:
-		#    ca_file      = /run/lmnradius/dc-ca.pem
-		#    require_cert = 'demand'
-		require_cert = 'allow'
-		tls_min_version = "1.2"
-	}
+	#  NB: no `tls { }` block here on purpose. libldap must not initialise TLS in
+	#  this process (GnuTLS-vs-OpenSSL crash, see the TRANSPORT note above). When
+	#  the DC link needs encryption, the entrypoint routes it through stunnel and
+	#  ${LDAP_SERVER_EFFECTIVE} points at the loopback listener; stunnel verifies
+	#  the DC certificate (optionally against a mounted CA, LDAP_CA).
+	start_tls = no
 
 	#  Connection pool. The ${thread[pool].*} values come from radiusd.conf.
 	pool {
