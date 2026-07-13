@@ -13,9 +13,9 @@ und **erzwungene Server-Zertifikatsprüfung** gegen eine dedizierte EAP-CA —
 **eine** self-contained FreeRADIUS-Instanz pro Server, verwaltet über
 **REST-API + CLI** auf einer **eigenen RADIUS-VM**.
 
-> **Status:** **`v0.1.0` — P0-Gerüst; noch nicht lauffähig.**
-> Repository-Scaffold, `CLAUDE.md` und die Architektur-/Entscheidungs-Docs stehen;
-> Control-/Data-Plane-Code, Image und E2E folgen (siehe **[`CHANGELOG.md`](CHANGELOG.md)**).
+> **Status:** **`v0.1.1`** — vollständig (P0–P6); die Data-Plane ist an einem echten
+> linuxmuster-Setup **runtime-bewiesen** (Member-Join, PEAP-MSCHAPv2 via winbind,
+> Per-Rollen-VLAN). Details in **[`CHANGELOG.md`](CHANGELOG.md)**.
 > Es fehlen noch **menschliche Gates**: Data-plane-Image auf **GHCR**
 > veröffentlichen und Digest pinnen; **GPG-Signatur** des `.deb` mit dem
 > linuxmuster-Schlüssel; standortspezifische **AD-Fakten** (Realm/Base-DN/

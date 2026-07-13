@@ -10,18 +10,45 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-13
+
+**Erstes Runtime-Release:** die Data-Plane ist jetzt an einem **echten linuxmuster-DC**
+bewiesen (Member-Join, PEAP-MSCHAPv2 via winbind, Per-Rollen-VLAN). Der Live-E2E deckte
+mehrere Laufzeit-Bugs auf, die `radiusd -XC` und statische Reviews nicht finden konnten —
+alle behoben und re-verifiziert. Protokoll in [`docs/references.md`](docs/references.md).
+
+### Fixed
+- **`rlm_ldap` über `ldaps://` bringt den *threaded* FreeRADIUS zum Absturz** (libldap=GnuTLS
+  vs. FreeRADIUS=OpenSSL) — LDAP-TLS wird jetzt in einem lokalen **stunnel** terminiert
+  (`rlm_ldap` spricht Klartext über die Loopback; stunnel re-verschlüsselt zum DC). (ADR-015)
+- **Der Supervisor riss gesunde Container ab:** `kill -0` gibt unter `--cap-drop ALL` (kein
+  `CAP_KILL`) `EPERM` auf den `freerad`-eigenen radiusd zurück (= „tot") — Liveness läuft jetzt
+  über `/proc/<pid>`, der Teardown über den PID-Namespace-Collapse.
+- **Das Per-SSID-Gate wies jede SSID ab:** `Called-Station-SSID` ist FreeRADIUS-intern und wird
+  von `copy_request_to_tunnel` nicht in den PEAP-Tunnel getragen — `rewrite_called_station_id`
+  läuft jetzt im **inner-tunnel** (Korrektur zu ADR-007).
+- **Domänen-Join:** `net ads join` ohne `MEMBER`-Positional (das ist `net rpc join`);
+  `kerberos method = secrets only` (kein Keytab-Schreibversuch auf dem read-only rootfs); der
+  Join braucht ein **Admin-/delegiertes** Konto (ein einfacher Benutzer scheitert).
+- **Config-Assemblierung unter dem gehärteten Profil:** `cp -dR --preserve=mode` statt `cp -a`
+  (CAP_FOWNER weg), `chmod` vor `chown`, und `clients.conf` überschreiben statt anhängen (sonst
+  Kollision mit dem Stock-`client localhost` auf 127.0.0.1).
+- **`discover-ad-facts.sh`:** `all-*`/`global-*` als schulübergreifende Aggregatgruppen
+  behandeln (keine Schulen).
+
 ### Added
+- **`stunnel4`** im Data-Plane-Image + optionale DC-Zertifikatsprüfung via `LDAP_CA`.
 - **Renovate-Digest-Automatik:** ein `renovate.json`-customManager, der den
   `DEFAULT_IMAGE`-`@sha256`-Pin in `controlplane/lmnradius/models.py` +
   `deploy/instances/*.yaml` verfolgt (Tag `:latest`), plus ein self-hosted
   `.github/workflows/renovate.yml` (wöchentlich + `workflow_dispatch`) — Renovate schlägt
   Digest-Bumps als PR vor (automerge aus, Mensch merged → neues `.deb`).
-- **`docs/install.md`:** Schritt-für-Schritt-Erstinstallation (VM → `.deb` → AD-Setup → CA →
-  Instanz + Cert → UniFi/OPNsense → Client-Pinning → Abnahme → Updates).
+- **`docs/install.md`** (Schritt-für-Schritt-Erstinstallation), das Live-E2E-Verifikations-
+  protokoll in **`docs/references.md`** und **ADR-015** (LDAP-TLS via stunnel).
 
 ### Changed
-- **`DEFAULT_IMAGE` auf den gebauten GHCR-Digest gepinnt** (`…@sha256:4b052ab9…`, das
-  v0.1.0-Image), damit die Control-Plane exakt das von der CI gebaute Image zieht.
+- **`DEFAULT_IMAGE` auf das E2E-verifizierte GHCR-Image gepinnt**, damit die Control-Plane
+  exakt das von der CI gebaute, gegen einen echten DC getestete Image zieht.
 
 ## [0.1.0] - 2026-07-10
 

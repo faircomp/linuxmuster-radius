@@ -51,10 +51,10 @@ _IMAGE_RE = re.compile(
 )
 
 # Default data-plane image for new/updated instances, so callers need not pass
-# --image. Pinned to an immutable ``@sha256:<digest>`` — the v0.1.0 image built and
-# published to GHCR by the build-image workflow; Renovate keeps it current (same
-# rationale as linuxmuster-squid). The image validator requires an explicit :tag or
-# @sha256 and rejects a bare repo either way.
+# --image. Pinned to an immutable ``@sha256:<digest>`` — the data-plane image built and
+# published to GHCR by the build-image workflow (verified end-to-end against a real DC);
+# Renovate keeps it current (same rationale as linuxmuster-squid). The image validator
+# requires an explicit :tag or @sha256 and rejects a bare repo either way.
 DEFAULT_IMAGE = "ghcr.io/faircomp/linuxmuster-radius@sha256:4ffe58f835616a9803b407b89c85831b077bf214206edd0ca90b6d1921971c4c"
 
 
