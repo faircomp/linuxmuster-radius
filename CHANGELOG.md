@@ -10,6 +10,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-04
+
+**Hotfix-Release:** das `.deb` installierte die `lmnradius`-CLI **nicht in den PATH** — auf
+einer echten Installation gefunden (`lmnradius: command not found` direkt nach dem ersten
+Schritt der Anleitung).
+
+### Fixed
+- **`lmnradius` fehlte im PATH:** das Paket legte die CLI nur im hermetischen venv unter
+  `/opt/linuxmuster-radius/venv/bin/` ab; der `postinst` nutzte intern den vollen Pfad und
+  maskierte den Fehler dadurch (Dienst + `update-all` liefen, der Admin-Befehl fehlte). Das
+  `.deb` liefert jetzt den paketierten Symlink `/usr/bin/lmnradius` mit (v0.1.0–v0.1.3
+  betroffen; Workaround dort: `ln -s /opt/linuxmuster-radius/venv/bin/lmnradius /usr/local/bin/`).
+
+### Added
+- **CI-Install-Smoke-Test in `build-deb`:** das gebaute Paket wird jetzt wirklich installiert
+  und wie in der Anleitung benutzt (`command -v lmnradius` = `/usr/bin/lmnradius`,
+  `lmnradius --help`, Dienststart + `lmnradius health` mit Journal-Dump bei Fehlschlag) —
+  reines Bauen hatte über vier Releases nichts über das installierte Layout bewiesen.
+
 ## [0.1.3] - 2026-08-04
 
 **Konsolidierungs-Release:** das `.deb` liefert jetzt das **verifizierte `:0.1.2`-Release-Image**

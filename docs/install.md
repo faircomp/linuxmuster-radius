@@ -39,7 +39,7 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 ## 1. RADIUS-VM — Docker + `.deb`
 ```bash
 curl -fsSL https://get.docker.com | sh                      # Docker
-VER=0.1.3
+VER=0.1.4
 curl -fsSLo lmnradius.deb \
   https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_all.deb
 sudo apt install -y ./lmnradius.deb
