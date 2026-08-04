@@ -10,6 +10,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+### Changed
+- **`DEFAULT_IMAGE` auf das `:0.1.2`-Release-Image gepinnt** (`@sha256:804a7e9d…`) — zuvor
+  per Digest gezogen und gegen den echten linuxmuster-DC verifiziert (frisches
+  Zustandsvolume = Neuinstallations-Pfad, `healthy` in 6 s, `ntlm_auth`-Matrix, volle
+  PEAP-Matrix **7/7** mit `role-teacher`→VLAN 20 / `role-student`→VLAN 10; Protokoll in
+  `docs/references.md`). Das nächste `.deb` liefert damit das Release-Image aus.
+- **CI-Gate-Tools gepinnt** (`ruff`/`mypy`/`reuse`/`pytest`): eine neue ruff-Version hatte
+  den Default-Regelsatz erweitert und die Pipeline ohne Codeänderung rot gefärbt.
+  Ein Renovate-customManager hält die Pins als review-pflichtige PRs aktuell.
+- **Doku präzisiert:** Das Join-Konto ist **teilverifiziert** (einfacher Benutzer scheitert
+  mit `Insufficient access`; Administrator/delegiertes Konto funktioniert — belegt im
+  Live-E2E); offen bleibt allein die Vorab-Adoption via `linuxmuster-import-devices`.
+  Die früheren pauschalen „NICHT VERIFIZIERT"-Hinweise in `operations.md`,
+  `radius-and-ad.md` und `provision-radius-account.sh` sagten das noch nicht.
+
 ## [0.1.2] - 2026-08-04
 
 **Standort-Release:** beide DC-Helferskripte wurden gegen eine echte linuxmuster-7-Installation

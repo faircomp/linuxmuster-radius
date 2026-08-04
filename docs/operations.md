@@ -50,10 +50,11 @@ Reihenfolge — jeder Schritt setzt den vorigen voraus:
    linuxmuster-import-devices          # legt das Maschinenkonto an (falls nicht via RUN_IMPORT=1)
    ```
 
-   > **⚠️ HONEST LIMIT — NICHT VERIFIZIERT.** Welches Konto/welche Rechte in das
-   > `join.authfile` gehören (adoptiert `net ads join MEMBER` das vorab angelegte
-   > Computerkonto sauber, oder braucht es ein delegiertes Join-Konto?) ist ungeklärt und
-   > wird erst im crabbox-E2E belegt — siehe [`radius-and-ad.md`](radius-and-ad.md) (§ 2)
+   > **Join-Konto (verifiziert am echten DC, 2026-07-12):** Ein einfacher Benutzer kann
+   > **nicht** joinen (`Insufficient access`) — in das `join.authfile` gehört der
+   > linuxmuster-Administrator bzw. ein delegiertes Konto mit Maschinenkonten-Rechten.
+   > **Offen bleibt** nur, ob ein via `import-devices` **vorab** angelegtes Computerkonto
+   > vom Join sauber adoptiert wird — siehe [`radius-and-ad.md`](radius-and-ad.md) (§ 2)
    > und `decisions.md` (ADR-006). Das Skript zeigt **nie** ein Secret an.
 
 3. **AD-Fakten ermitteln — auf dem Samba-DC** (read-only; berührt/joined nichts). Liefert

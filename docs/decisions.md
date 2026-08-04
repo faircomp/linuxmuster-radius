@@ -106,9 +106,12 @@ angelegt — RADIUS **konsumiert** sie nur. LDAP-Bind-Account = der bestehende
 `cn=global-binduser,ou=Management,ou=GLOBAL,dc=...`, Passwort auf dem lmn-Server in
 `/etc/linuxmuster/.secret/global-binduser`. **Verworfene Alternative:**
 Maschinenkonto/Gruppen von Hand via `samba-tool`/`net` anlegen — driftet von
-Sophomorix ab und ist nicht lmn-konform. **Offen (E2E):** ob `devices.csv` Rolle
-`server` bereits ein Computerkonto **vorab anlegt**, das ein späteres `net ads join`
-**sauber adoptiert** — in der crabbox-E2E zu verifizieren. **Quelle:**
+Sophomorix ab und ist nicht lmn-konform. **Verifiziert (Live-E2E 2026-07-12):** das
+Join-Konto braucht Admin-/delegierte Rechte — ein einfacher Benutzer scheitert mit
+`Insufficient access`; `net ads join` nimmt kein `MEMBER`-Positional. **Offen (E2E):**
+ob `devices.csv` Rolle `server` bereits ein Computerkonto **vorab anlegt**, das ein
+späteres `net ads join` **sauber adoptiert** (im E2E legte der Join das Konto selbst
+an). **Quelle:**
 docs.linuxmuster.net, „setup-file-server" (Member-Server via devices.csv +
 linuxmuster-import-devices).
 

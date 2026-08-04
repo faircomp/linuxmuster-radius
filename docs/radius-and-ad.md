@@ -98,16 +98,17 @@ RADIUS-VM.
   Der Entrypoint kopiert dieses Authfile als `root:root 0600` auf tmpfs und nutzt es
   **genau einmal** für den Join — `radiusd`/`freerad` sehen es nie.
 
-**HONEST LIMIT — NICHT VERIFIZIERT (im crabbox-E2E, P6, zu beweisen).** Der Entrypoint
-ist so geschrieben, dass `net ads join MEMBER` ein **vorab angelegtes** Computerkonto
-**adoptiert** (statt ein frisches zu erzeugen). Ob `devices.csv` mit Rolle `server` +
-`linuxmuster-import-devices` dieses Computerkonto tatsächlich schon **so** anlegt, dass
-der spätere `net ads join` es **sauber adoptiert** — oder ob dafür ein eigenes,
-**delegiertes Join-Konto** mit Rechten zum Anlegen/Zurücksetzen des Maschinenkontos
-nötig ist — ist **NICHT VERIFIZIERT**. Genau das (welches Konto/welche Rechte in das
-`JOIN_SECRET`-Authfile gehören und welche OU das Konto belegt) wird in der P6-E2E
-belegt, nicht angenommen (siehe ADR-006 „Offen (E2E)" und den Abschnitt „NICHT
-VERIFIZIERT" in [`references.md`](references.md)).
+**Join-Konto — TEILVERIFIZIERT (Live-E2E gegen eine echte linuxmuster, 2026-07-12,
+Protokoll in [`references.md`](references.md)).** Verifiziert ist: ein **einfacher
+Benutzer kann nicht joinen** (`Insufficient access … does not have administrator
+privileges`); mit dem **linuxmuster-Administrator** (bzw. einem delegierten Konto mit
+dem Recht, Maschinenkonten anzulegen/zurückzusetzen) läuft `net ads join` durch —
+genau das gehört in das `JOIN_SECRET`-Authfile. Ebenfalls aus dem E2E: `net ads join`
+nimmt **kein** `MEMBER`-Positional (das ist `net rpc join`-Syntax). **WEITERHIN OFFEN**
+ist allein die Adoptionsfrage: ob `devices.csv` mit Rolle `server` +
+`linuxmuster-import-devices` das Computerkonto **vorab** so anlegt, dass der spätere
+Join es **sauber adoptiert** (im E2E existierte kein vorab angelegtes Konto — der Join
+erzeugte es selbst). Siehe ADR-006 „Offen (E2E)".
 
 ## 3. LDAP-Bind — der `global-binduser` (nur Authorization)
 

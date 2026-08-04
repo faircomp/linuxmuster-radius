@@ -15,13 +15,14 @@
 #       - radius.secret    (AP-Shared-Secret, identisch im UniFi-RADIUS-Profil)
 #       Es wird NIE ein Secret ausgegeben.
 #
-# HONEST LIMIT — NICHT VERIFIZIERT (im crabbox-E2E, P6, zu beweisen): Ob 'devices.csv'
-# mit Rolle 'server' + linuxmuster-import-devices das Computerkonto bereits SO anlegt,
-# dass der spätere `net ads join MEMBER` es SAUBER ADOPTIERT, oder ob dafür ein eigenes,
-# DELEGIERTES Join-Konto (Recht zum Anlegen/Zurücksetzen des Maschinenkontos) nötig ist,
-# ist ungeklärt. Genau das (welches Konto/welche Rechte in das join.authfile gehören)
-# wird in der P6-E2E belegt — siehe ../docs/radius-and-ad.md und ../docs/decisions.md
-# (ADR-006 „Offen (E2E)").
+# JOIN-KONTO — TEILVERIFIZIERT (Live-E2E gegen echte linuxmuster, 2026-07-12):
+# Ein EINFACHER Benutzer kann NICHT joinen ('Insufficient access'); mit dem
+# linuxmuster-Administrator-Konto (bzw. einem delegierten Konto mit dem Recht,
+# Maschinenkonten anzulegen/zurückzusetzen) läuft `net ads join` durch. Das gehört
+# also in das join.authfile. WEITERHIN OFFEN: ob ein via devices.csv Rolle 'server'
+# + linuxmuster-import-devices VORAB angelegtes Computerkonto vom späteren Join
+# sauber ADOPTIERT wird (im E2E legte der Join das Konto selbst an) — siehe
+# ../docs/radius-and-ad.md und ../docs/decisions.md (ADR-006 „Offen (E2E)").
 #
 # Usage:  provision-radius-account.sh <hostname> <mac> <ip> [out-secrets-dir]
 # Env:    WORKGROUP=... (sonst via testparm/smb.conf), DEVICES_CSV=...,
@@ -196,5 +197,6 @@ echo "  1. Secret-Dateien aus ${OUT_DIR} in den Control-Plane secrets_dir übert
 echo "     (Namen unverändert lassen: sie sind die --join-secret/--ldap-bind-secret/"
 echo "      --radius-secret-Referenzen in 'lmnradius create')."
 echo "  2. Auf dem DC ${IMPORT_CMD} laufen lassen (falls oben nicht via RUN_IMPORT=1 erfolgt)."
-echo "  3. HONEST LIMIT beachten: das join.authfile-Konto/-Recht ist NICHT VERIFIZIERT"
-echo "     -> im crabbox-E2E (P6) beweisen (siehe Kopf-Kommentar / ADR-006)."
+echo "  3. Join-Konto: ein einfacher Benutzer kann NICHT joinen (verifiziert) — ins"
+echo "     join.authfile gehört der Administrator bzw. ein delegiertes Join-Konto."
+echo "     Offen bleibt nur die Vorab-Adoption via import-devices (Kopf-Kommentar/ADR-006)."
