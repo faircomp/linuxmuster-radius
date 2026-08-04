@@ -37,6 +37,27 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Build .deb
         run: sudo VERSION="${{ steps.ver.outputs.version }}" bash packaging/build-deb.sh
+      # Install smoke test: actually install the built package and use it the way the
+      # docs tell an admin to. Building alone proved nothing about the installed layout —
+      # v0.1.0..v0.1.3 shipped without the CLI on PATH and no pipeline noticed.
+      - name: Install smoke test
+        run: |
+          set -eux
+          sudo apt-get install -y ./linuxmuster-radius_*.deb
+          test "$(command -v lmnradius)" = /usr/bin/lmnradius
+          sudo lmnradius --help >/dev/null
+          # postinst enabled + started the service; the API must answer like the docs promise.
+          ok=0
+          for i in $(seq 1 30); do
+            if sudo lmnradius health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then
+            systemctl status linuxmuster-radius.service --no-pager || true
+            sudo journalctl -u linuxmuster-radius.service --no-pager | tail -50 || true
+            exit 1
+          fi
+          sudo lmnradius health
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:

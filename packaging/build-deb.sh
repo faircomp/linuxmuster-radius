@@ -25,8 +25,14 @@ python3 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet "$ROOT/controlplane"
 
 echo "== staging tree =="
-mkdir -p "$STAGE/opt/linuxmuster-radius" "$STAGE/lib/systemd/system" "$STAGE/DEBIAN"
+mkdir -p "$STAGE/opt/linuxmuster-radius" "$STAGE/lib/systemd/system" "$STAGE/DEBIAN" \
+         "$STAGE/usr/bin"
 cp -a "$VENV" "$STAGE/opt/linuxmuster-radius/venv"
+# Operator CLI onto PATH. The venv keeps the hermetic interpreter, but without this
+# packaged symlink `lmnradius` is "command not found" for the admin — the docs' very
+# first post-install step. (Found on a real install, 2026-08-04: postinst masked it by
+# calling the full venv path itself.) Packaged symlink => dpkg removes it on purge.
+ln -s /opt/linuxmuster-radius/venv/bin/lmnradius "$STAGE/usr/bin/lmnradius"
 cp "$ROOT/packaging/systemd/linuxmuster-radius.service" \
    "$STAGE/lib/systemd/system/linuxmuster-radius.service"
 sed "s/@VERSION@/$VERSION/" "$ROOT/packaging/debian/control" > "$STAGE/DEBIAN/control"
