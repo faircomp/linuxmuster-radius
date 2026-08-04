@@ -12,9 +12,12 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 [`certs-and-ca.md`](certs-and-ca.md) (Zertifikate), [`deployment-gpo.md`](deployment-gpo.md)
 (UniFi/OPNsense/GPO), [`architecture.md`](architecture.md) (Gesamtbild).
 
-> **Reifegrad (ehrlich):** Die **Control-Plane ist bewiesen** (114 Tests). Der
-> **Data-Plane-Runtime-Beweis** (Container-Domänen-Beitritt + PEAP gegen ein echtes AD)
-> steht noch aus — er läuft über den crabbox-E2E bzw. die Abnahme in **Schritt 8**.
+> **Reifegrad (ehrlich):** Die **Control-Plane ist bewiesen** (114 Tests), und die
+> **Data-Plane ist an einem echten linuxmuster-AD runtime-bewiesen** (Container-Member-Join,
+> PEAP-MSCHAPv2 via winbind, Rollen-Gate → VLAN; Protokoll in
+> [`references.md`](references.md)). **Nicht** an deiner Umgebung bewiesen sind deine
+> konkreten Fakten (Realm, Gruppen, SSIDs, VLANs, AP-Subnetze) und der
+> `devices.csv`-Rolle-`server`-Pfad — deshalb bleibt die Abnahme in **Schritt 8** Pflicht.
 > Behandle die Erstinstallation als **kontrollierte Inbetriebnahme mit Abnahme**.
 
 ## Überblick
@@ -32,7 +35,7 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 ## 1. RADIUS-VM — Docker + `.deb`
 ```bash
 curl -fsSL https://get.docker.com | sh                      # Docker
-VER=0.1.0
+VER=0.1.1
 curl -fsSLo lmnradius.deb \
   https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_all.deb
 sudo apt install -y ./lmnradius.deb
