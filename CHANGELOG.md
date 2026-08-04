@@ -10,6 +10,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-04
+
+**Konsolidierungs-Release:** das `.deb` liefert jetzt das **verifizierte `:0.1.2`-Release-Image**
+aus (Tag und ausgeliefertes Image damit erstmals aus derselben Release-Reihe), die CI ist gegen
+Toolchain-Drift gepinnt, und die Doku spiegelt den tatsächlichen Verifikationsstand des
+Join-Kontos.
+
 ### Changed
 - **`DEFAULT_IMAGE` auf das `:0.1.2`-Release-Image gepinnt** (`@sha256:804a7e9d…`) — zuvor
   per Digest gezogen und gegen den echten linuxmuster-DC verifiziert (frisches

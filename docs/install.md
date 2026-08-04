@@ -13,7 +13,8 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 (UniFi/OPNsense/GPO), [`architecture.md`](architecture.md) (Gesamtbild).
 
 > **Reifegrad (ehrlich):** Die **Control-Plane ist bewiesen** (114 Tests), und **genau das
-> Image, das diese Anleitung installiert** (`v0.1.2`), wurde gegen einen produktiven
+> Data-Plane-Image, das dieses `.deb` gepinnt ausliefert** (das `:0.1.2`-Release-Image),
+> wurde gegen einen produktiven
 > linuxmuster-DC verifiziert — mit **frischem Zustandsvolume**, also dem Pfad einer
 > Neuinstallation: Member-Join, `healthy` nach 6 s, und die **Auth-Matrix 7/7** (Lehrer →
 > Accept in VLAN 20, Schüler → VLAN 10; falsche Rolle / unbekannte SSID / kein `wifi` /
@@ -38,7 +39,7 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 ## 1. RADIUS-VM — Docker + `.deb`
 ```bash
 curl -fsSL https://get.docker.com | sh                      # Docker
-VER=0.1.2
+VER=0.1.3
 curl -fsSLo lmnradius.deb \
   https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_all.deb
 sudo apt install -y ./lmnradius.deb
