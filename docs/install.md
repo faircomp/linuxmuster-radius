@@ -139,6 +139,13 @@ sudo lmnradius status meineschule              # exists/running/health
 sudo lmnradius logs meineschule --tail 60
 ```
 
+> **Erwartetes Verhalten beim allerersten `create`:** es speichert die Instanz **und
+> versucht sofort zu starten** — das Zertifikat aus der nächsten Zeile existiert da noch
+> nicht, also meldet es `EAP cert material missing … run 'lmnradius cert issue'`
+> (bis v0.1.4 leider nur als `error 500`; der Klartext steht dann im
+> `journalctl -u linuxmuster-radius`). Kein Problem: die Instanz **ist** gespeichert —
+> einfach mit `cert issue` + `reconcile` fortfahren.
+
 ## 6. Netz — UniFi + OPNsense
 - **UniFi:** ein **RADIUS-Profil** (Server = RADIUS-VM-IP, Ports 1812/1813, Secret = Inhalt von `radius.secret`);
   pro SSID ein WPA2/WPA3-Enterprise-WLAN mit diesem Profil; SSID **fest ans VLAN** (Lehrer→20,

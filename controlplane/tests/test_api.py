@@ -251,3 +251,39 @@ def test_insecure_bind_warns(caplog: Any) -> None:
     with caplog.at_level(_logging.WARNING, logger="lmnradius"):
         _warn_if_insecure_bind("127.0.0.1")
     assert "cleartext" not in caplog.text
+
+
+def test_missing_cert_precondition_is_409_with_detail(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    instance_data: dict[str, Any],
+    docker: Any,
+    monkeypatch: Any,
+) -> None:
+    """The fail-closed apply path raises FileNotFoundError with an actionable message
+    (e.g. create before 'cert issue'); the API must surface it as 409 + detail, not
+    swallow it into a bare 500 (seen on a real first install)."""
+
+    def _boom(_inst: Any) -> dict[str, Any]:
+        raise FileNotFoundError("EAP cert material missing: /x/ca.pem (run 'lmnradius cert issue')")
+
+    monkeypatch.setattr(docker, "ensure_running", _boom)
+    resp = client.post("/v1/instances", json=instance_data, headers=auth_headers)
+    assert resp.status_code == 409
+    assert "cert issue" in resp.json()["detail"]
+
+
+def test_unreadable_secret_precondition_is_409(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    instance_data: dict[str, Any],
+    docker: Any,
+    monkeypatch: Any,
+) -> None:
+    def _boom(_inst: Any) -> dict[str, Any]:
+        raise PermissionError("/etc/linuxmuster-radius/secrets/radius.secret")
+
+    monkeypatch.setattr(docker, "ensure_running", _boom)
+    resp = client.post("/v1/instances", json=instance_data, headers=auth_headers)
+    assert resp.status_code == 409
+    assert "permission denied" in resp.json()["detail"]

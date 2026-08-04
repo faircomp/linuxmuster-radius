@@ -55,6 +55,26 @@ def create_app(
             content={"detail": f"docker daemon unreachable: {exc}"},
         )
 
+    # Operator-precondition errors from the apply path (docker_service is fail-closed):
+    # a missing EAP cert ("run 'lmnradius cert issue'"), a missing secret file, or a
+    # secret the service user cannot read. These carry an actionable message, and
+    # swallowing them into a bare 500 hides it from the CLI — exactly what happened on
+    # a real first install (create before cert issue). 409: the request is fine, the
+    # server-side state is not yet. Messages contain paths, never secret values.
+    @app.exception_handler(FileNotFoundError)
+    async def _missing_precondition(_request: Request, exc: FileNotFoundError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(PermissionError)
+    async def _unreadable_precondition(_request: Request, exc: PermissionError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": f"permission denied (check owner lmnradius / mode 0600): {exc}"},
+        )
+
     auth = [Depends(verify)]
 
     def _require(name: str) -> Instance:

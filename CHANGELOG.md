@@ -10,6 +10,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+### Fixed
+- **API verschluckte handlungsleitende Fehlermeldungen als `error 500`:** die fail-closed
+  Vorbedingungsfehler des Apply-Pfads (fehlendes EAP-Zertifikat mit dem Hinweis
+  `run 'lmnradius cert issue'`, fehlende oder für den Dienstnutzer unlesbare Secret-Datei)
+  erreichten die CLI nur als nackter `Internal Server Error` — auf einer echten
+  Erstinstallation gefunden (`create` vor `cert issue`). Sie werden jetzt als **409 mit
+  Klartext-`detail`** ausgeliefert (Meldungen enthalten Pfade, nie Secret-Werte);
+  `install.md` erklärt das erwartete Verhalten des ersten `create`.
+
 ## [0.1.4] - 2026-08-04
 
 **Hotfix-Release:** das `.deb` installierte die `lmnradius`-CLI **nicht in den PATH** — auf
