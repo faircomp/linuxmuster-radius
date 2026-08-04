@@ -239,3 +239,26 @@ den DC erfolgreich, und auf SSID `…-Lehrer` → **Access-Accept mit `Tunnel-Pr
 (Tunnel-Type=VLAN, Medium=IEEE-802). Lehrer auf `…-Schueler` (Rollen-Gate) und unbekannte SSID →
 **Reject**. Die komplette Kette EAP-Cert → PEAP → winbind → `rlm_ldap`-Gruppen-Gate → VLAN ist
 damit gegen einen echten linuxmuster-DC bestätigt. (verifiziert)
+
+### Release-Image `:0.1.2` gegen den echten DC verifiziert (2026-08-04)
+
+Das veröffentlichte Image `ghcr.io/faircomp/linuxmuster-radius:0.1.2`
+(`@sha256:804a7e9d…`) wurde **per Digest gezogen** und im **gehärteten** Profil
+(`--cap-drop ALL`, read-only rootfs, Port-Mapping `1812-1813/udp`) mit **frischem
+`/var/lib/samba`-Volume** — also dem Pfad jeder Neuinstallation — gegen den echten DC geprüft:
+
+- Frischer Member-Join, `healthy` nach 6 s, alle drei Daemons (winbindd, stunnel4, freeradius)
+  dauerhaft oben, `wbinfo -t` = „RPC calls succeeded". (verifiziert)
+- `ntlm_auth`-Matrix: richtiges PW + `wifi` → `NT_STATUS_OK`; falsches PW →
+  `NT_STATUS_WRONG_PASSWORD`; Konto ohne `wifi` → `NT_STATUS_LOGON_FAILURE`. (verifiziert)
+- **PEAP-Matrix mit den schulübergreifenden Gates** (`role-teacher`/`role-student`), 7/7:
+  Lehrer @ Lehrer-SSID → **Accept, `Tunnel-Private-Group-Id` = `3230` hex = „20"**;
+  Schüler @ Schüler-SSID → **Accept, `3130` hex = „10"**; Schüler @ Lehrer-SSID, Lehrer @
+  Schüler-SSID, unbekannte SSID, Konto ohne `wifi`, falsches Passwort → je **Reject**.
+  Damit ist auch die Empfehlung „`role-teacher` für Lehrer *aller* Schulen" praktisch belegt,
+  nicht nur aus dem Verzeichnis abgeleitet. (verifiziert)
+
+`DEFAULT_IMAGE` ist auf genau diesen Digest gepinnt. **Testartefakt, kein Produktfehler:** ein
+zweiter Container mit demselben Host-Port-Mapping scheitert erwartungsgemäß mit
+`Bind for 0.0.0.0:1812 failed: port is already allocated` — pro Host also nur **eine** Instanz
+mit den Standardports (siehe ADR-002: eine Instanz pro Server).

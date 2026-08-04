@@ -55,7 +55,7 @@ _IMAGE_RE = re.compile(
 # published to GHCR by the build-image workflow (verified end-to-end against a real DC);
 # Renovate keeps it current (same rationale as linuxmuster-squid). The image validator
 # requires an explicit :tag or @sha256 and rejects a bare repo either way.
-DEFAULT_IMAGE = "ghcr.io/faircomp/linuxmuster-radius@sha256:15110604361b8bf617a218a4bd9b4384ca9de098d56983926cc601742edf098c"
+DEFAULT_IMAGE = "ghcr.io/faircomp/linuxmuster-radius@sha256:804a7e9db2d662e8b4319b3223d3811c70e271ed0084f22ebf3a8a06bed33b20"
 
 
 class SSID(BaseModel):
