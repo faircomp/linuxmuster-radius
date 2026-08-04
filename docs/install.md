@@ -133,7 +133,7 @@ sudo lmnradius logs meineschule --tail 60
 ```
 
 ## 6. Netz — UniFi + OPNsense
-- **UniFi:** ein **RADIUS-Profil** (Server = RADIUS-VM-IP, Ports 1812/1813, Secret = `ap-secret`);
+- **UniFi:** ein **RADIUS-Profil** (Server = RADIUS-VM-IP, Ports 1812/1813, Secret = Inhalt von `radius.secret`);
   pro SSID ein WPA2/WPA3-Enterprise-WLAN mit diesem Profil; SSID **fest ans VLAN** (Lehrer→20,
   Schüler→10). **RADIUS-Clients = AP-Management-Subnetz** (nicht die Controller-IP!).
 - **OPNsense:** **`1812-1813/udp`** vom AP-Subnetz zur RADIUS-VM freigeben.

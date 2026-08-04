@@ -74,7 +74,7 @@ lmnradius create --name meineschule \
   --client-subnet 10.1.0.0/16 \
   --ssid meineschule-lehrer:meineschule-teachers:20 \
   --ssid meineschule-schueler:meineschule-students:10 \
-  --join-secret radius-join --ldap-bind-secret global-binduser --radius-secret ap-secret
+  --join-secret join.authfile --ldap-bind-secret ldap-bind.secret --radius-secret radius.secret
 ```
 
 > Nur die **Controller-IP** einzutragen erzeugt „unknown client" und stille Rejects
