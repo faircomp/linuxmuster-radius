@@ -52,18 +52,43 @@ gezogen.
 *(Optionale Härtung: `deploy/docker-socket-proxy.yml` starten und `docker_host: "tcp://127.0.0.1:2375"` in `config.yml` setzen.)*
 
 ## 2. Auf dem linuxmuster-DC — AD vorbereiten
+Die beiden Helferskripte direkt aus dem Release laden (auf dem DC gibt es kein Repo-Checkout):
 ```bash
-sudo bash scripts/discover-ad-facts.sh        # read-only: erkennt realm/wg/Base-DN/Gruppen -> fertige create-Vorlage
-sudo bash scripts/provision-radius-account.sh # RADIUS-Server als Device (Rolle 'server') + Secret-Vorlagen
+VER=0.1.4        # dieselbe Version wie in Schritt 1
+BASE=https://raw.githubusercontent.com/faircomp/linuxmuster-radius/v${VER}/scripts
+curl -fsSLO ${BASE}/discover-ad-facts.sh
+curl -fsSLO ${BASE}/provision-radius-account.sh
+
+sudo bash discover-ad-facts.sh                            # read-only: Fakten -> fertige create-Vorlage
+sudo bash provision-radius-account.sh radius <MAC> <IP>   # <hostname> <mac> <ip> der RADIUS-VM!
 ```
+`provision-radius-account.sh` **braucht die drei Argumente** (Hostname/MAC/IP der RADIUS-VM),
+trägt sie als Device (Rolle `server`) in die `devices.csv` ein, fragt interaktiv das
+Join-Konto und das AP-Shared-Secret ab und legt die drei Secret-Dateien unter
+`./radius-secrets/` an — es zeigt dabei **nie** ein Secret an.
 > In der **DC-`/etc/samba/smb.conf`** muss `ntlm auth = mschapv2-and-ntlmv2-only` stehen
 > (sonst schlägt jeder WLAN-Login fehl; Paket-Updates entfernen die Zeile gern).
 > **Nutzer/Gruppen/`wifi`/`global-binduser` bleiben reine Sophomorix-Welt** — nichts von Hand anlegen.
 
-## 3. Secrets ablegen (RADIUS-VM, `/etc/linuxmuster-radius/secrets/`, `0600`)
-- `radius-join` — Domänen-Beitritts-Authfile (samba `-A`: `username=`/`password=`/`domain=`)
-- `global-binduser` — das Passwort aus `/etc/linuxmuster/.secret/global-binduser` vom DC
-- `ap-secret` — das WLAN-Shared-Secret (identisch zum UniFi-RADIUS-Profil)
+## 3. Secrets auf die RADIUS-VM übertragen (`/etc/linuxmuster-radius/secrets/`)
+Die drei Dateien aus Schritt 2 (Namen **unverändert lassen** — sie sind die
+`--…-secret`-Referenzen in Schritt 5):
+
+| Datei | Inhalt |
+|---|---|
+| `join.authfile` | Domänen-Beitritts-Authfile (samba `-A`) — **Administrator- bzw. delegiertes Konto** (ein einfacher Benutzer kann nicht joinen, verifiziert) |
+| `ldap-bind.secret` | das `global-binduser`-Passwort (kopiert das Skript automatisch vom DC) |
+| `radius.secret` | das WLAN-Shared-Secret (identisch zum UniFi-RADIUS-Profil, Schritt 6) |
+
+```bash
+# auf dem DC: übertragen, Besitz/Rechte setzen, Kopie auf dem DC löschen
+scp radius-secrets/* root@<radius-vm>:/etc/linuxmuster-radius/secrets/
+ssh root@<radius-vm> 'chown lmnradius:lmnradius /etc/linuxmuster-radius/secrets/* \
+  && chmod 600 /etc/linuxmuster-radius/secrets/*'
+rm -rf radius-secrets
+```
+> Der `chown lmnradius:` ist nötig: der Dienst läuft als `lmnradius` und muss die Dateien
+> lesen können — nach `scp` als root gehören sie sonst root.
 
 ## 4. EAP-CA anlegen
 ```bash
@@ -99,7 +124,7 @@ sudo lmnradius create --name meineschule \
   --client-subnet 10.0.0.0/16 \
   --ssid lehrer-wlan:role-teacher:20 \
   --ssid schueler-wlan:role-student:10 \
-  --join-secret radius-join --ldap-bind-secret global-binduser --radius-secret ap-secret
+  --join-secret join.authfile --ldap-bind-secret ldap-bind.secret --radius-secret radius.secret
 
 sudo lmnradius cert issue meineschule         # Server-Cert (serverAuth + eapOverLAN, SAN=FQDN)
 sudo lmnradius reconcile                       # Container starten/abgleichen
