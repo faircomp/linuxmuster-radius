@@ -12,13 +12,16 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 [`certs-and-ca.md`](certs-and-ca.md) (Zertifikate), [`deployment-gpo.md`](deployment-gpo.md)
 (UniFi/OPNsense/GPO), [`architecture.md`](architecture.md) (Gesamtbild).
 
-> **Reifegrad (ehrlich):** Die **Control-Plane ist bewiesen** (114 Tests), und die
-> **Data-Plane ist an einem echten linuxmuster-AD runtime-bewiesen** (Container-Member-Join,
-> PEAP-MSCHAPv2 via winbind, Rollen-Gate → VLAN; Protokoll in
-> [`references.md`](references.md)). **Nicht** an deiner Umgebung bewiesen sind deine
-> konkreten Fakten (Realm, Gruppen, SSIDs, VLANs, AP-Subnetze) und der
-> `devices.csv`-Rolle-`server`-Pfad — deshalb bleibt die Abnahme in **Schritt 8** Pflicht.
-> Behandle die Erstinstallation als **kontrollierte Inbetriebnahme mit Abnahme**.
+> **Reifegrad (ehrlich):** Die **Control-Plane ist bewiesen** (114 Tests), und **genau das
+> Image, das diese Anleitung installiert** (`v0.1.2`), wurde gegen einen produktiven
+> linuxmuster-DC verifiziert — mit **frischem Zustandsvolume**, also dem Pfad einer
+> Neuinstallation: Member-Join, `healthy` nach 6 s, und die **Auth-Matrix 7/7** (Lehrer →
+> Accept in VLAN 20, Schüler → VLAN 10; falsche Rolle / unbekannte SSID / kein `wifi` /
+> falsches Passwort → je Reject). Protokoll in [`references.md`](references.md).
+> **Nicht** an deiner Umgebung bewiesen sind deine konkreten Fakten (Realm, Gruppen, SSIDs,
+> VLANs, AP-Subnetze) und der `devices.csv`-Rolle-`server`-Pfad — deshalb bleibt die Abnahme
+> in **Schritt 8** Pflicht. Behandle die Erstinstallation als **kontrollierte Inbetriebnahme
+> mit Abnahme**.
 
 ## Überblick
 - **Control-Plane** (`.deb`): FastAPI-Dienst + `lmnradius`-CLI auf der RADIUS-VM, an
@@ -125,6 +128,11 @@ LMNRADIUS_ALLOW_REAL=1 bash scripts/tests/run.sh e2e   # auf einer Docker-VM / c
 Erwartung: Lehrer @ Lehrer-SSID → online in VLAN 20 · Schüler @ Lehrer-SSID → abgewiesen ·
 Schüler @ Schüler-SSID → online in VLAN 10 · falsches Passwort → abgewiesen · Gerät ohne die
 gepinnte CA → abgewiesen.
+
+> Diese Matrix lief gegen einen echten DC bereits **7/7 durch** — mit genau den
+> `role-teacher`/`role-student`-Gates aus Schritt 5 und den zurückgelieferten VLANs 20/10.
+> Hier prüfst du also nicht die Mechanik, sondern **deine** Werte: Gruppennamen,
+> SSID-Schreibweise, VLAN-IDs, AP-Subnetz und die `devices.csv`-Adoption in deiner Domäne.
 
 ## 9. Updates (alles über den `.deb`)
 ```bash
