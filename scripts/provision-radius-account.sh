@@ -61,11 +61,19 @@ WORKGROUP="$(printf '%s' "$WORKGROUP" | tr '[:lower:]' '[:upper:]')"
 
 # =============================================================== (a) devices.csv
 echo "== (a) devices.csv — RADIUS-VM als Device mit Rolle 'server' =="
-# NOTE: Feld-Layout der linuxmuster.net-7 devices.csv (docs.linuxmuster.net,
-# „setup-file-server"): room;hostname;group;mac;ip;... — die Rolle steckt im
-# 'group'-Feld ('server'). Passt es nicht zur vorhandenen Datei, DEVICES_CSV setzen
-# bzw. die Spalten an die vorhandenen Zeilen angleichen.
-DEVICE_LINE="server;${RADIUS_HOST};server;${RADIUS_MAC};${RADIUS_IP};;;;;;"
+# Feld-Layout nach devices.csv(5) — 15 Felder, semikolon-getrennt:
+#   1 room · 2 hostname · 3 device group (hardwareclass) · 4 mac · 5 ip ·
+#   6 msoffice-key · 7 windows-key · 8 dhcp-options · 9 sophomorixRole ·
+#   10 reserviert · 11 pxe-flag (0=kein pxe) · 12-14 reserviert · 15 sophomorixComment
+# WICHTIG: die ROLLE gehört in Feld 9, NICHT in Feld 3 (Feld 3 ist die
+# Hardwareklasse, bei Servern typischerweise 'nopxe'). Nur Feld 9 entscheidet,
+# ob überhaupt ein Computerkonto angelegt wird (devices.csv(5), sophomorixRole).
+# Gültige Rollennamen: `sophomorix-samba --show-roletype`.
+# (Gegen eine echte linuxmuster-7-devices.csv verifiziert, 2026-08-04.)
+DEVICE_ROOM="${DEVICE_ROOM:-server}"        # Raum-Feld; bei Servern konventionell 'server'
+DEVICE_GROUP="${DEVICE_GROUP:-nopxe}"       # Hardwareklasse: ein Server bootet nicht per PXE
+DEVICE_ROLE="${DEVICE_ROLE:-server}"        # sophomorixRole -> legt das Maschinenkonto an
+DEVICE_LINE="${DEVICE_ROOM};${RADIUS_HOST};${DEVICE_GROUP};${RADIUS_MAC};${RADIUS_IP};;;;${DEVICE_ROLE};;0;;;;linuxmuster-radius"
 
 if [ ! -f "$DEVICES_CSV" ]; then
     echo "   ${DEVICES_CSV} nicht gefunden. Kandidaten:"
@@ -82,6 +90,17 @@ elif grep -qiE "(^|;)${RADIUS_HOST}(;|\$)" "$DEVICES_CSV"; then
 else
     echo "   Vorgesehene Zeile:"
     echo "     ${DEVICE_LINE}"
+    # Layout-Abgleich gegen die BESTEHENDEN Zeilen: schreibt eine Installation mehr/weniger
+    # Felder (linuxmuster-setup hängt z. B. Marker-Spalten an), passt unser Satz nicht und
+    # der Import bekäme eine verrutschte Zeile. Nur warnen, nicht abbrechen — die
+    # Feldbedeutung 1-15 ist laut devices.csv(5) stabil, Zusatzfelder sind erlaubt.
+    ref_nf="$(awk -F';' '!/^[[:space:]]*#/ && NF > 1 { print NF; exit }' "$DEVICES_CSV" 2>/dev/null || true)"
+    our_nf="$(printf '%s' "$DEVICE_LINE" | awk -F';' '{print NF}')"
+    if [ -n "${ref_nf:-}" ] && [ "$ref_nf" != "$our_nf" ]; then
+        echo "   [WARN] bestehende Zeilen haben ${ref_nf} Felder, unsere ${our_nf}."
+        echo "          Die Felder 1-15 sind laut devices.csv(5) fest (Rolle = Feld 9);"
+        echo "          zusätzliche Spalten sind erlaubt. Zeile vor dem Import gegenprüfen."
+    fi
     if [ "${DRY_RUN:-0}" = "1" ]; then
         echo "   DRY_RUN=1 -> nicht angehängt. Zum Anhängen ohne DRY_RUN erneut ausführen."
     else

@@ -89,16 +89,40 @@ role_groups() {
 
 ROLE_GROUPS="$(role_groups)"
 
-# Unique schools derived from the role-group prefixes.
+# Authoritative school list: one directory per school under the Sophomorix config.
+# Needed because '<name>-teachers'/'<name>-students' ALSO exist for adminclasses
+# (e.g. 'testklasse-teachers'), so the group names alone cannot tell a school from a
+# class — inferring from them invents schools that do not exist.
+# (Verified against a real linuxmuster 7: only 'default-school' is a school there,
+# while 'testklasse-*' groups exist. 2026-08-04.)
+SCHOOL_DIRS="${SCHOOL_DIRS:-/etc/linuxmuster/sophomorix}"
+known_schools() {
+    [ -d "$SCHOOL_DIRS" ] || return 0
+    for d in "$SCHOOL_DIRS"/*/; do
+        [ -d "$d" ] || continue
+        s="$(basename "$d")"
+        case "$s" in *.d|.*) continue ;; esac
+        printf '%s\n' "$s"
+    done | sort -u
+}
+
+# Unique schools derived from the role-group prefixes, cross-checked against the
+# authoritative list above (fallback: prefixes only, if that list is unavailable).
 schools_of() {
+    _known="$(known_schools)"
     printf '%s\n' "$ROLE_GROUPS" | while IFS= read -r g; do
         [ -n "$g" ] || continue
         case "$g" in
-            all-teachers|all-students|global-teachers|global-students) : ;;  # Aggregatgruppen, keine Schule
-            *-teachers) printf '%s\n' "${g%-teachers}" ;;
-            *-students) printf '%s\n' "${g%-students}" ;;
-            teachers|students) printf '%s\n' "default-school" ;;
+            all-teachers|all-students|global-teachers|global-students) continue ;;  # Aggregate, keine Schule
+            *-teachers) _s="${g%-teachers}" ;;
+            *-students) _s="${g%-students}" ;;
+            teachers|students) _s="default-school" ;;
+            *) continue ;;
         esac
+        # Nur ausgeben, wenn es die Schule wirklich gibt (sonst ist es eine Klasse).
+        if [ -z "$_known" ] || printf '%s\n' "$_known" | grep -Fxq "$_s"; then
+            printf '%s\n' "$_s"
+        fi
     done | sort -u
 }
 

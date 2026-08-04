@@ -190,6 +190,25 @@ Read-only gegen einen produktiven linuxmuster-Server geprüft (noch ohne Contain
   Pro Einsatz zu entscheiden. (offen)
 - `all-*`/`global-*` sind **schulübergreifende Aggregatgruppen**, keine Schulen (discover-Skript
   korrigiert). (verifiziert)
+- **`devices.csv`-Feldlayout (devices.csv(5) + echte Datei, 2026-08-04):** 15 Felder,
+  `1 room · 2 hostname · 3 device group (hardwareclass) · 4 mac · 5 ip · 6 msoffice · 7 windows ·
+  8 dhcp-options · 9 sophomorixRole · 10 reserviert · 11 pxe-flag · 12-14 reserviert ·
+  15 sophomorixComment`. Die **Rolle steht in Feld 9**, nicht in Feld 3 — und **nur** Feld 9
+  entscheidet, ob ein Computerkonto angelegt wird. Echte Serverzeile:
+  `server;fs;nopxe;<mac>;<ip>;;;;server;;0;;;;SETUP;`. `provision-radius-account.sh` erzeugte
+  zuvor die Rolle in Feld 3 (Computerkonto wäre ausgeblieben) — korrigiert + Feldzahl-Warnung
+  ergänzt. (verifiziert)
+- **Gruppen-Verschachtelung / Mehrschul-WLAN (2026-08-04):** Das direkte `memberOf` eines Lehrers
+  enthält `role-teacher`, `teachers`, `wifi` — **nicht** `all-teachers`. Die `all-*`-Gruppen
+  erreicht man nur **rekursiv** (`member:1.2.840.113556.1.4.1941:=<userDN>` liefert zusätzlich
+  `all-teachers`, `all-wifi`, …). Da `rlm_ldap` hier über `membership_attribute = memberOf`
+  prüft (direkt, nicht transitiv), ist für „Lehrer **aller** Schulen" die schulunabhängige,
+  **direkt** zugewiesene Rollengruppe **`role-teacher`** (bzw. `role-student`) das passende Gate;
+  ein Gate auf `all-teachers` würde mit der aktuellen Konfiguration abweisen. (verifiziert)
+- Gruppen wie `<klasse>-teachers`/`<klasse>-students` existieren auch für **Adminklassen** — aus
+  Gruppennamen allein lässt sich eine Schule nicht von einer Klasse unterscheiden. Autoritativ ist
+  die Verzeichnisliste unter `/etc/linuxmuster/sophomorix/*/` (discover-Skript nutzt sie jetzt).
+  (verifiziert)
 
 ### Voller Laufzeit-Test: Container-Join + PEAP-MSCHAPv2 gegen den echten DC (2026-07-12)
 
