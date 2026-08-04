@@ -17,8 +17,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # The gate tools are PINNED on purpose: an unpinned `pip install ruff` picks up
+      # whatever released last, and a linter that widens its default rule set turns the
+      # pipeline red without a single line of our code changing (exactly what happened
+      # on 2026-08-04). Pinned == the developer's local result == CI's result. Renovate
+      # proposes bumps as PRs, so upgrading stays a deliberate, reviewed step.
       - name: Install control-plane + tools
-        run: pip install ruff mypy pytest pytest-asyncio httpx types-PyYAML cryptography reuse ./controlplane
+        run: |
+          pip install \
+            ruff==0.15.21 \
+            mypy==2.2.0 \
+            reuse==6.2.0 \
+            pytest==9.1.1 \
+            pytest-asyncio httpx types-PyYAML cryptography ./controlplane
       - name: ruff check
         run: ruff check .
       - name: ruff format
