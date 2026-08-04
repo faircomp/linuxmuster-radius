@@ -10,6 +10,41 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-04
+
+**Standort-Release:** beide DC-Helferskripte wurden gegen eine echte linuxmuster-7-Installation
+und `devices.csv(5)` geprüft — dabei kamen zwei Fehler heraus, die auf einem produktiven DC
+falsche Ergebnisse erzeugt hätten. Dazu die verifizierte Antwort auf „Lehrer **aller** Schulen
+in einem WLAN".
+
+### Fixed
+- **`provision-radius-account.sh` schrieb die Rolle ins falsche `devices.csv`-Feld:** die
+  `sophomorixRole` landete in Feld 3 (Gerätegruppe/Hardwareklasse), Feld 9 — die tatsächliche
+  Rolle — blieb leer. Da **nur Feld 9** darüber entscheidet, ob ein Computerkonto angelegt wird,
+  wäre das Gerät ohne `server`-Rolle importiert worden und der spätere Member-Join hätte kein
+  Maschinenkonto zum Adoptieren gehabt. Jetzt wird das dokumentierte 15-Feld-Layout erzeugt
+  (Rolle in Feld 9, Hardwareklasse `nopxe`, PXE-Flag 0), Raum/Gruppe/Rolle sind über
+  `DEVICE_ROOM`/`DEVICE_GROUP`/`DEVICE_ROLE` überschreibbar, und bei abweichender Feldzahl warnt
+  das Skript vor dem Anhängen.
+- **`discover-ad-facts.sh` erfand Schulen:** Adminklassen tragen dasselbe Namensmuster wie
+  Schulen (`testklasse-teachers`), wurden also als Schule ausgegeben — inklusive `create`-Vorlage
+  für eine nicht existierende Schule. Die Schulliste kommt jetzt aus
+  `/etc/linuxmuster/sophomorix/*/` (autoritativ) und die Namenspräfixe werden dagegen geprüft.
+- **`architecture.md` behauptete einen rekursiven Gruppencheck** — `rlm_ldap` prüft hier über
+  `memberOf`, also **direkt**. Korrigiert.
+- **`docs/install.md`** zeigte nach dem v0.1.1-Release noch das 0.1.0-Paket und einen überholten
+  Reifegrad-Hinweis; **`README.md`** zählte erledigte Punkte (GHCR-Image, Digest-Pin,
+  Laufzeit-Beweis) noch als offen.
+
+### Added
+- **Anleitung für ein schulübergreifendes WLAN:** `install.md` erklärt jetzt die Gruppenwahl je
+  SSID — **`role-teacher`/`role-student`** deckt Lehrer bzw. Schüler **aller Schulen** ab, weil
+  diese Rollengruppen schulunabhängig und **direkt** am Nutzer hinterlegt sind.
+  **`all-teachers` funktioniert dafür nicht:** die `all-*`-Aggregate enthalten die Schulgruppen
+  statt der Nutzer, und `memberOf` ist nicht transitiv — ein solches Gate würde jeden Lehrer
+  abweisen (an echter linuxmuster verifiziert, siehe `references.md`; als ehrliche Grenze in
+  ADR-007 dokumentiert).
+
 ## [0.1.1] - 2026-07-13
 
 **Erstes Runtime-Release:** die Data-Plane ist jetzt an einem **echten linuxmuster-DC**

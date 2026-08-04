@@ -72,10 +72,12 @@ die Entscheidungen mit Begründung und verworfenen Alternativen: `docs/decisions
   `Called-Station-Id` in **`Called-Station-SSID`** — **im inner-tunnel**, weil
   `copy_request_to_tunnel` interne Attribute nicht überträgt (ADR-007); darauf wird verzweigt.
 - **Per-SSID-Gruppen-Gate:** je SSID eine Zielgruppe, geprüft über `rlm_ldap`
-  (rekursiv, Bind als `global-binduser`; dessen LDAP-TLS terminiert ein lokales
-  **stunnel** zum DC, ADR-015): `<schule>-lehrer` → `<schule>-teachers`,
-  `<schule>-schueler` → `<schule>-students`, sonst Access-Reject. `ntlm_auth
-  --require-membership-of` allein reicht nicht — es prüft **genau eine** Gruppe.
+  (Bind als `global-binduser`; dessen LDAP-TLS terminiert ein lokales **stunnel** zum DC,
+  ADR-015). Geprüft wird die **direkte** Mitgliedschaft (`memberOf`), **nicht** rekursiv —
+  darum schulübergreifend `role-teacher`/`role-student` (direkt zugewiesen) und **nicht** die
+  verschachtelten `all-*`-Aggregate; alternativ pro Schule `<schule>-lehrer` →
+  `<schule>-teachers`. Sonst Access-Reject. `ntlm_auth --require-membership-of` allein reicht
+  nicht — es prüft **genau eine** Gruppe (ADR-007).
 - **VLAN:** Default ist das **statische VLAN je SSID** im UniFi-Profil (SSID = Rolle
   = VLAN). Optional dynamisch per RFC 2868: `Tunnel-Type=13`,
   `Tunnel-Medium-Type=6`, `Tunnel-Private-Group-Id=<vlan>` im Access-Accept.
@@ -132,8 +134,10 @@ ldap_bind_dn:  CN=global-binduser,OU=Management,OU=GLOBAL,DC=linuxmuster,DC=lan
 client_subnets:                                 # LISTE — AP-Management-CIDR(s), wiederholbar
   - 10.0.0.0/16
 ssids:                                           # SSIDs = Config, NICHT je ein Container
-  - { name: "<schule>-lehrer",   allowed_group: "<schule>-teachers", vlan: 20 }
-  - { name: "<schule>-schueler", allowed_group: "<schule>-students", vlan: 30 }
+  # schulübergreifend (Regelfall): direkt zugewiesene Sophomorix-Rollengruppen
+  - { name: "lehrer-wlan",   allowed_group: "role-teacher", vlan: 20 }
+  - { name: "schueler-wlan", allowed_group: "role-student", vlan: 30 }
+  # pro Schule stattdessen: allowed_group "<schule>-teachers" / "<schule>-students"
 server_fqdn:   radius.linuxmuster.lan            # SAN des EAP-Server-Zerts
 join_secret:   <secret-ref>                      # Secret-Referenz für den Domänen-Join
 image:         ghcr.io/faircomp/linuxmuster-radius@sha256:<digest>   # optional, sonst DEFAULT_IMAGE

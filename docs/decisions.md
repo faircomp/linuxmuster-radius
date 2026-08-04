@@ -116,7 +116,11 @@ linuxmuster-import-devices).
 **Status:** Accepted (Architekturentscheidung). **Entscheidung:** Die SSID wird über
 die FreeRADIUS-Policy `rewrite_called_station_id` in `Called-Station-SSID` geparst;
 darauf wird verzweigt und die Gruppenmitgliedschaft über das LDAP-Modul (`rlm_ldap`)
-erzwungen: SSID `<schule>-lehrer` → verlangt Gruppe `<schule>-teachers`;
+erzwungen. Die Zielgruppe je SSID ist **freie Konfiguration** (`ssids[].allowed_group`), die
+beiden üblichen Muster sind: **schulübergreifend** eine SSID auf `role-teacher` bzw.
+`role-student` (schulunabhängige, direkt zugewiesene Sophomorix-Rollengruppen — der Regelfall,
+wenn Lehrer *aller* Schulen ein gemeinsames WLAN bekommen sollen), **oder** pro Schule:
+SSID `<schule>-lehrer` → verlangt Gruppe `<schule>-teachers`;
 `<schule>-schueler` → verlangt `<schule>-students`; sonst `Access-Reject`. Zusätzlich
 die WLAN-Grundberechtigung über die `wifi`-Gruppe. **Begründung:** eine Instanz muss
 mehrere SSIDs mit **je eigener** Gruppenregel bedienen. **Verworfene Alternative:**
@@ -129,7 +133,14 @@ Samba-`--require-membership-of` (Ein-Gruppen-Grenze); FreeRADIUS-Policy
 `rewrite_called_station_id` läuft im **inner-tunnel**, nicht im äusseren Server:
 `&Called-Station-SSID` ist ein FreeRADIUS-**internes** Attribut, das
 `copy_request_to_tunnel` **nicht** über die Tunnelgrenze trägt — es muss dort (neu)
-erzeugt werden, wo das Post-Auth-Gate es liest.
+erzeugt werden, wo das Post-Auth-Gate es liest. **Ehrliche Grenze (verifiziert 2026-08-04):**
+`rlm_ldap` prüft hier über `membership_attribute = memberOf`, also **direkte** Mitgliedschaft.
+Verschachtelte Gruppen — insbesondere die linuxmuster-Aggregate `all-teachers`/`all-students`,
+die die Schulgruppen *enthalten* statt die Nutzer — greifen damit **nicht** und würden jeden
+Nutzer abweisen. Für ein schulübergreifendes WLAN daher `role-teacher`/`role-student`
+(direkt zugewiesen) verwenden; wollte man die `all-*`-Gruppen nutzen, bräuchte es eine
+rekursive Auflösung (`member:1.2.840.113556.1.4.1941:=<userDN>`) — bewusst nicht umgesetzt,
+weil die Rollengruppen denselben Zweck ohne Zusatzkomplexität erfüllen.
 
 ### ADR-008 — VLAN-Zuweisung
 **Status:** Accepted (Default; dynamischer Modus optional). **Entscheidung:** Default

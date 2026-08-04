@@ -35,7 +35,7 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 ## 1. RADIUS-VM — Docker + `.deb`
 ```bash
 curl -fsSL https://get.docker.com | sh                      # Docker
-VER=0.1.1
+VER=0.1.2
 curl -fsSLo lmnradius.deb \
   https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_all.deb
 sudo apt install -y ./lmnradius.deb
@@ -68,6 +68,23 @@ sudo lmnradius ca init                        # dedizierte EAP-Root (Passphrase!
 > **Empfehlung:** den Root-Key nach dem Ausstellen **offline** nehmen (siehe `certs-and-ca.md`).
 
 ## 5. Instanz + Server-Zertifikat
+
+**Welche Gruppe je SSID?** Das ist die eine Entscheidung, die du hier bewusst treffen musst:
+
+| Ziel | `--ssid`-Gruppe | Hinweis |
+|---|---|---|
+| **Lehrer/Schüler ALLER Schulen** in je einer SSID (Regelfall) | `role-teacher` / `role-student` | schulunabhängig, von Sophomorix aus `sophomorixRole` befüllt und **direkt** am Nutzer hinterlegt |
+| Nur eine bestimmte Schule | `<schule>-teachers` / `<schule>-students` (Default-Schule: `teachers`/`students`) | pro Schule eine eigene SSID |
+
+> **Nicht `all-teachers` verwenden.** Die `all-*`-Gruppen sind **verschachtelt** (`all-teachers`
+> enthält die Gruppe `teachers`, nicht die Nutzer), und AD führt `memberOf` nur **direkt**, nicht
+> transitiv. Das Gate prüft über `memberOf` — ein Gate auf `all-teachers` weist deshalb **jeden
+> Lehrer ab**. Verifiziert an einer echten linuxmuster (siehe [`references.md`](references.md)).
+> **`role-teacher` erfüllt denselben Zweck** und funktioniert.
+
+> **Randfall:** Schuladministratoren sind in `role-schooladministrator`, **nicht** in
+> `role-teacher` — sollen sie ins Lehrer-WLAN, brauchen sie eine eigene SSID/Gruppe.
+
 ```bash
 sudo lmnradius create --name meineschule \
   --server-fqdn radius.linuxmuster.lan \
@@ -76,8 +93,8 @@ sudo lmnradius create --name meineschule \
   --ldap-base-dn OU=SCHOOLS,DC=linuxmuster,DC=lan \
   --ldap-bind-dn CN=global-binduser,OU=Management,OU=GLOBAL,DC=linuxmuster,DC=lan \
   --client-subnet 10.0.0.0/16 \
-  --ssid meineschule-lehrer:meineschule-teachers:20 \
-  --ssid meineschule-schueler:meineschule-students:10 \
+  --ssid lehrer-wlan:role-teacher:20 \
+  --ssid schueler-wlan:role-student:10 \
   --join-secret radius-join --ldap-bind-secret global-binduser --radius-secret ap-secret
 
 sudo lmnradius cert issue meineschule         # Server-Cert (serverAuth + eapOverLAN, SAN=FQDN)

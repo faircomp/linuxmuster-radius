@@ -13,17 +13,18 @@ und **erzwungene Server-Zertifikatsprüfung** gegen eine dedizierte EAP-CA —
 **eine** self-contained FreeRADIUS-Instanz pro Server, verwaltet über
 **REST-API + CLI** auf einer **eigenen RADIUS-VM**.
 
-> **Status:** **`v0.1.1`** — vollständig (P0–P6); die Data-Plane ist an einem echten
+> **Status:** **`v0.1.2`** — vollständig (P0–P6); die Data-Plane ist an einem echten
 > linuxmuster-Setup **runtime-bewiesen** (Member-Join, PEAP-MSCHAPv2 via winbind,
 > Per-Rollen-VLAN). Details in **[`CHANGELOG.md`](CHANGELOG.md)**.
-> Es fehlen noch **menschliche Gates**: Data-plane-Image auf **GHCR**
-> veröffentlichen und Digest pinnen; **GPG-Signatur** des `.deb` mit dem
-> linuxmuster-Schlüssel; standortspezifische **AD-Fakten** (Realm/Base-DN/
-> Rollengruppen/`global-binduser`); **AD-Member-Registrierung** des Servers als
+> Erledigt: Image auf **GHCR** veröffentlicht + Digest gepinnt, und der
+> **Laufzeit-Beweis** (separate-VM-Member + winbind + PEAP + Rollen-VLAN) ist an einem
+> echten linuxmuster-DC erbracht — beides bewiesen, nicht angenommen.
+> Offen bleiben **menschliche Gates** je Standort: **GPG-Signatur** des `.deb` mit dem
+> linuxmuster-Schlüssel; die standortspezifischen **AD-Fakten** (Realm/Base-DN/
+> Rollengruppen/`global-binduser`); die **AD-Member-Registrierung** des Servers als
 > Gerät (role `server`) in `devices.csv` + `linuxmuster-import-devices` auf dem DC;
-> manuelle **Windows-GPO-/MDM-Verteilung** von CA + gesperrtem WLAN-Profil
-> (Servername gepinnt); und der **crabbox-E2E-Beweis** (separate-VM-Member +
-> winbind sind offiziell dünn dokumentiert und werden bewiesen, nicht angenommen).
+> und die **Windows-GPO-/MDM-Verteilung** von CA + gesperrtem WLAN-Profil
+> (Servername gepinnt).
 
 ## Warum
 
@@ -55,9 +56,11 @@ git-versioniert verwaltet über **REST-API + Typer-CLI**.
   (Mini-Supervisor). Mehrere Instanzen nur für **harte Isolation**
   (z. B. ein separates Gäste-RADIUS).
 - **Pro-SSID-Gating & VLAN:** die SSID wird via `rewrite_called_station_id` in
-  `Called-Station-SSID` geparst; pro SSID erzwingt `rlm_ldap` die Rollengruppe
-  (`<schule>-lehrer` → Gruppe `<schule>-teachers`, `<schule>-schueler` →
-  `<schule>-students`, sonst **Access-Reject**). VLAN standardmäßig **statisch
+  `Called-Station-SSID` geparst; pro SSID erzwingt `rlm_ldap` die Rollengruppe —
+  schulübergreifend `role-teacher`/`role-student` (Regelfall) oder pro Schule
+  `<schule>-lehrer` → `<schule>-teachers`, sonst **Access-Reject**. Geprüft wird die
+  **direkte** Mitgliedschaft, daher **nicht** die verschachtelten `all-*`-Aggregate
+  (siehe ADR-007). VLAN standardmäßig **statisch
   pro SSID in UniFi** (SSID = Rolle); RADIUS-vergebenes **dynamisches VLAN**
   (RFC 2868: `Tunnel-Type=13`, `Tunnel-Medium-Type=6`,
   `Tunnel-Private-Group-Id=<vlan>`) ist ein optionaler Modus.

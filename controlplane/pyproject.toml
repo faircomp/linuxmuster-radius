@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lmnradius"
-version = "0.1.1"
+version = "0.1.2"
 description = "REST API + CLI managing the FreeRADIUS WLAN control plane"
 readme = "README.md"
 requires-python = ">=3.11"
