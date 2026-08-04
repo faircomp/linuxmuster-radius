@@ -173,7 +173,7 @@ belegt, nicht angenommen:
 - ⚠️ Die Zeile `ntlm auth = mschapv2-and-ntlmv2-only` lebt in der **DC-`smb.conf`** und
   wird von Paket-Updates gelegentlich entfernt → nach Updates prüfen. (medium)
 
-## Empirisch verifiziert an echter linuxmuster (2026-07-12, `EVSVBZ.ORG`, linuxmuster-base7 7.3.36)
+## Empirisch verifiziert an einer echten linuxmuster-Installation (2026-07-12, linuxmuster-base7 7.3.36)
 
 Read-only gegen einen produktiven linuxmuster-Server geprüft (noch ohne Container/Join):
 - `discover-ad-facts.sh` erkennt realm/workgroup/Base-DN/Bind-DN/Gruppen korrekt; der

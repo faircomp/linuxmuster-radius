@@ -65,7 +65,14 @@ sudo bash provision-radius-account.sh radius <MAC> <IP>   # <hostname> <mac> <ip
 `provision-radius-account.sh` **braucht die drei Argumente** (Hostname/MAC/IP der RADIUS-VM),
 trägt sie als Device (Rolle `server`) in die `devices.csv` ein, fragt interaktiv das
 Join-Konto und das AP-Shared-Secret ab und legt die drei Secret-Dateien unter
-`./radius-secrets/` an — es zeigt dabei **nie** ein Secret an.
+`./radius-secrets/` an — es zeigt dabei **nie** ein Secret an. Es arbeitet bewusst
+vorsichtig: Backup der `devices.csv` vor jedem Anhängen, idempotent (vorhandener Host wird
+übersprungen), und mit `DRY_RUN=1` zeigt es die Zeile nur an, ohne zu schreiben.
+
+> **`linuxmuster-import-devices` startet das Skript absichtlich NICHT selbst** — den Import
+> stößt du danach bewusst an. Er verarbeitet die **gesamte** `devices.csv` (DHCP/DNS/AD für
+> **alle** Geräte, nicht nur das neue) — wie bei jeder Geräteaufnahme also am besten in einem
+> ruhigen Moment ausführen und die neue Zeile vorher kurz gegenlesen.
 > In der **DC-`/etc/samba/smb.conf`** muss `ntlm auth = mschapv2-and-ntlmv2-only` stehen
 > (sonst schlägt jeder WLAN-Login fehl; Paket-Updates entfernen die Zeile gern).
 > **Nutzer/Gruppen/`wifi`/`global-binduser` bleiben reine Sophomorix-Welt** — nichts von Hand anlegen.
