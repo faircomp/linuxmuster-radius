@@ -211,6 +211,12 @@ sed -i \
     -e "s|^logdir = .*|logdir = ${RUN}/log|" \
     -e "s|^run_dir = .*|run_dir = ${RUN}/run|" \
     "${RADDB}/radiusd.conf"
+# Log every auth DECISION ("Login OK"/"Login incorrect" + reason + username): the stock
+# default `auth = no` leaves the operator blind — on a real first deployment the admin
+# could not tell from `lmnradius logs` whether a WLAN attempt was accepted or why it was
+# rejected. Usernames are operational data, not secrets; the password knobs
+# (auth_badpass/auth_goodpass) stay `no` — this sed matches ONLY the exact `auth = no`.
+sed -i -E 's|^([[:space:]]*)auth = no$|\1auth = yes|' "${RADDB}/radiusd.conf"
 # Fail loudly if the sed did not match: a future radiusd.conf format change would else
 # silently leave raddbdir/confdir pointing at the read-only /etc tree.
 grep -qx "raddbdir = ${RADDB}" "${RADDB}/radiusd.conf" || {

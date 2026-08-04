@@ -10,6 +10,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+### Changed
+- **Auth-Entscheidungen werden jetzt geloggt** (`log { auth = yes }` im assemblierten
+  radiusd.conf): `lmnradius logs` zeigt pro Versuch `Login OK` / `Login incorrect` samt
+  Benutzername und Ablehnungsgrund — vorher war der Betreiber blind (Stock-Default
+  `auth = no`; auf der ersten echten Installation aufgefallen). Passwörter werden
+  weiterhin **nie** geloggt (`auth_badpass`/`auth_goodpass` bleiben `no`).
+
 ### Fixed
 - **API verschluckte handlungsleitende Fehlermeldungen als `error 500`:** die fail-closed
   Vorbedingungsfehler des Apply-Pfads (fehlendes EAP-Zertifikat mit dem Hinweis
