@@ -13,7 +13,7 @@ und **erzwungene Server-Zertifikatsprüfung** gegen eine dedizierte EAP-CA —
 **eine** self-contained FreeRADIUS-Instanz pro Server, verwaltet über
 **REST-API + CLI** auf einer **eigenen RADIUS-VM**.
 
-> **Status:** **`v0.1.4`** — vollständig (P0–P6); die Data-Plane ist an einem echten
+> **Status:** **`v0.1.5`** — vollständig (P0–P6); die Data-Plane ist an einem echten
 > linuxmuster-Setup **runtime-bewiesen** (Member-Join, PEAP-MSCHAPv2 via winbind,
 > Per-Rollen-VLAN). Details in **[`CHANGELOG.md`](CHANGELOG.md)**.
 > Erledigt: Image auf **GHCR** veröffentlicht + Digest gepinnt, und der

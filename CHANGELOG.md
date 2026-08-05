@@ -10,7 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-05
+
+**Betriebs-Release aus dem ersten Produktiveinsatz:** sichtbare Auth-Entscheidungen im Log,
+Klartext-Fehlermeldungen statt `error 500`, und das `.deb` pinnt das frisch gegen einen echten
+DC verifizierte Image (7/7-Matrix, diesmal inklusive Mehrschul-Basis-Gate `all-wifi`).
+
 ### Changed
+- **`DEFAULT_IMAGE` auf das Auth-Logging-Image gepinnt** (`@sha256:dddf55c0…`): per Digest
+  gezogen und gegen den echten DC verifiziert — frisches Zustandsvolume, `healthy` in 18 s,
+  `wbinfo -t` ok, volle PEAP-Matrix **7/7** mit `--wifi-group all-wifi` (VLAN 20/10 korrekt
+  dekodiert), und die neuen `Login OK`/`Login incorrect`-Zeilen erscheinen wie erwartet.
 - **Auth-Entscheidungen werden jetzt geloggt** (`log { auth = yes }` im assemblierten
   radiusd.conf): `lmnradius logs` zeigt pro Versuch `Login OK` / `Login incorrect` samt
   Benutzername und Ablehnungsgrund — vorher war der Betreiber blind (Stock-Default
