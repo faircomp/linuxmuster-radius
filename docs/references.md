@@ -209,6 +209,13 @@ Read-only gegen einen produktiven linuxmuster-Server geprüft (noch ohne Contain
   Gruppennamen allein lässt sich eine Schule nicht von einer Klasse unterscheiden. Autoritativ ist
   die Verzeichnisliste unter `/etc/linuxmuster/sophomorix/*/` (discover-Skript nutzt sie jetzt).
   (verifiziert)
+- **Die beiden Gates sind asymmetrisch (verifiziert 2026-08-05, echter DC):** das
+  **wifi-Grund-Gate** (`ntlm_auth --require-membership-of`) prüft das **NT-Token** und ist
+  **transitiv** — ein User, der nur direkt in `wifi` steckt (`wifi` ⊂ `all-wifi`), passiert
+  auch das Gate `all-wifi` (`NT_STATUS_OK`; Gegenprobe Nicht-Mitglied → `LOGON_FAILURE`).
+  Das **Rollen-Gate** (`rlm_ldap`, `memberOf`) bleibt dagegen **direkt** (nicht transitiv).
+  → Für **Mehrschul-Setups**: `--wifi-group all-wifi` deckt `wifi`, `<schule>-wifi`, … ab;
+  je SSID weiterhin die direkt zugewiesenen `role-teacher`/`role-student`. (verifiziert)
 
 ### Voller Laufzeit-Test: Container-Join + PEAP-MSCHAPv2 gegen den echten DC (2026-07-12)
 

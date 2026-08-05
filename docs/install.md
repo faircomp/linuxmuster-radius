@@ -121,6 +121,11 @@ sudo lmnradius ca init                        # dedizierte EAP-Root (Passphrase!
 > **Randfall:** Schuladministratoren sind in `role-schooladministrator`, **nicht** in
 > `role-teacher` — sollen sie ins Lehrer-WLAN, brauchen sie eine eigene SSID/Gruppe.
 
+> **Mehrere Schulen? Zusätzlich `--wifi-group all-wifi` setzen.** Das WLAN-Grund-Gate läuft
+> über das winbind-**Token** und ist — anders als das SSID-Gate — **transitiv** (am echten DC
+> verifiziert): `all-wifi` deckt damit `wifi`, `<schule>-wifi` und jede künftige Schule ab.
+> Mit dem Default `--wifi-group wifi` kämen nur Nutzer der Default-Schule durch das Grund-Gate.
+
 ```bash
 sudo lmnradius create --name meineschule \
   --server-fqdn radius.linuxmuster.lan \

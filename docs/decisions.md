@@ -143,7 +143,12 @@ die die Schulgruppen *enthalten* statt die Nutzer — greifen damit **nicht** un
 Nutzer abweisen. Für ein schulübergreifendes WLAN daher `role-teacher`/`role-student`
 (direkt zugewiesen) verwenden; wollte man die `all-*`-Gruppen nutzen, bräuchte es eine
 rekursive Auflösung (`member:1.2.840.113556.1.4.1941:=<userDN>`) — bewusst nicht umgesetzt,
-weil die Rollengruppen denselben Zweck ohne Zusatzkomplexität erfüllen.
+weil die Rollengruppen denselben Zweck ohne Zusatzkomplexität erfüllen. **Gegenstück
+(verifiziert 2026-08-05):** das **wifi-Grund-Gate** läuft über `ntlm_auth
+--require-membership-of` und prüft das **NT-Token — transitiv**: verschachtelte Gruppen wie
+`all-wifi` greifen dort (empirisch am echten DC: User nur in `wifi` ⊂ `all-wifi` →
+`NT_STATUS_OK` gegen `all-wifi`; Nicht-Mitglied → `LOGON_FAILURE`). Für Mehrschul-Setups ist
+deshalb `--wifi-group all-wifi` der richtige Basis-Gate-Wert.
 
 ### ADR-008 — VLAN-Zuweisung
 **Status:** Accepted (Default; dynamischer Modus optional). **Entscheidung:** Default
