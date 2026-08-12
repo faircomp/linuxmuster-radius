@@ -230,6 +230,14 @@ lmnradius reconcile      # liest den Soll-Zustand, zieht die gepinnten Digests -
   zurück.
 - Ist das **`/var/lib/samba`-Volume** verloren (kein Backup), **joint die Instanz beim
   ersten Start neu** — dafür muss das `join_secret` im `secrets_dir` liegen.
+- **AD-Gruppe gelöscht und neu angelegt** (z. B. `wifi`, `role-teacher`): für RADIUS
+  **unkritisch nach Wiederherstellen der Mitgliedschaften.** Beide Gates referenzieren
+  Gruppen **per Name** und lösen ihn bei jeder Anfrage frisch auf (`ntlm_auth
+  --require-membership-of=<WG>\<name>`; `&LDAP-Group == "<cn>"`) — nirgends im Stack wird
+  eine Gruppen-**SID** persistiert. Solange die Gruppe fehlt oder leer ist, äußert sich das
+  als **Access-Reject (fail-closed)**, nie als falsches VLAN. Das ist bewusst anders als bei
+  SID-basierten Windows-ACLs (etwa auf einem Fileserver-Share), die nach einem
+  Delete/Recreate von Hand nachgezogen werden müssen.
 
 ## Sicherheitslage (kurz)
 
