@@ -18,8 +18,8 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 > Pfad einer Neuinstallation: Member-Join, `healthy` nach 18 s, und die **Auth-Matrix 7/7**
 > (Lehrer → Accept in VLAN 20, Schüler → VLAN 10; falsche Rolle / unbekannte SSID / kein
 > `wifi` / falsches Passwort → je Reject), inklusive Mehrschul-Basis-Gate `all-wifi`.
-> Protokoll in [`references.md`](references.md). Zusätzlich läuft das Setup produktiv an
-> einer ersten echten Schule.
+> Protokoll in [`references.md`](references.md). Zusätzlich ist das Setup in einer realen
+> Schul-Testumgebung (echte APs, echte Domänen-Clients, Samba-AD) im Pilotbetrieb erprobt.
 > **Nicht** an deiner Umgebung bewiesen sind deine konkreten Fakten (Realm, Gruppen, SSIDs,
 > VLANs, AP-Subnetze) und der `devices.csv`-Rolle-`server`-Pfad — deshalb bleibt die Abnahme
 > in **Schritt 8** Pflicht. Behandle die Erstinstallation als **kontrollierte Inbetriebnahme
