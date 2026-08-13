@@ -34,6 +34,19 @@ server inner-tunnel {
 		#  post-auth per-SSID gate reads it. (Verified against a real DC, 2026-07-12.)
 		rewrite_called_station_id
 
+		#  Canonicalise Windows-qualified identities: the Windows-SSO checkbox
+		#  ("use my Windows logon") sends 'DOMAIN\user'; UPN-configured clients send
+		#  'user@realm'. mschap strips these itself (%{mschap:User-Name}), but the
+		#  LDAP user lookup and the per-SSID gate key on
+		#  %{%{Stripped-User-Name}:-%{User-Name}} -- without stripping, the group
+		#  check searches sAMAccountName='DOMAIN\user', finds nothing and rejects a
+		#  perfectly valid login. ntdomain/suffix split the name ONLY when the parsed
+		#  realm matches one of the LOCAL realms the entrypoint appends to proxy.conf
+		#  (${WORKGROUP} / the DNS domain) -- a bare sAMAccountName passes through
+		#  untouched, so BOTH forms keep working. Local realm = no proxying.
+		ntdomain
+		suffix
+
 		#  Sets Auth-Type for a direct MSCHAP inner exchange, if any.
 		chap
 		mschap

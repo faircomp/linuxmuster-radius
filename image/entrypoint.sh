@@ -268,6 +268,20 @@ fi
     printf '$-INCLUDE ${confdir}/instance.d/clients.conf\n'
 } > "${RADDB}/clients.conf"
 
+# Local realms for identity canonicalisation. Windows-SSO sends 'DOMAIN\user', UPN
+# clients 'user@realm'; the inner-tunnel ntdomain/suffix policies split those into
+# Stripped-User-Name ONLY if the parsed realm is defined here as a LOCAL realm (empty
+# block = strip, keep local, never proxy — rlm_realm docs). Bare sAMAccountNames are
+# untouched, so both qualified and unqualified logins work. The DNS-domain realm is
+# skipped when it equals the workgroup (single-label domains) — a duplicate realm
+# would fail the config check.
+{
+    printf 'realm %s {\n}\n' "${WORKGROUP}"
+    if [ "$(printf '%s' "${DNS_DOMAIN}" | tr '[:lower:]' '[:upper:]')" != "${WORKGROUP}" ]; then
+        printf 'realm %s {\n}\n' "${DNS_DOMAIN}"
+    fi
+} >> "${RADDB}/proxy.conf"
+
 # The rendered ldap mod carries the bind password — restrict it BEFORE the chown, while
 # it is still root-owned: the hardened profile drops CAP_FOWNER, so root cannot chmod a
 # file once chown has handed it to freerad. radiusd reads config as root then drops to
