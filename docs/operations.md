@@ -230,6 +230,13 @@ lmnradius reconcile      # liest den Soll-Zustand, zieht die gepinnten Digests -
   zurück.
 - Ist das **`/var/lib/samba`-Volume** verloren (kein Backup), **joint die Instanz beim
   ersten Start neu** — dafür muss das `join_secret` im `secrets_dir` liegen.
+- **Maschinenkonto (`RADIUS$`) auf dem DC gelöscht → ALLE Logins scheitern sofort**
+  (winbind-Vertrauenskanal tot). Häufigste Ursache in der Praxis (2026-08-13 real passiert):
+  `linuxmuster-import-devices` verwaltet Computerkonten **autoritativ** und räumt Konten ab,
+  die nicht in der `devices.csv` stehen — der RADIUS-Server muss dort also registriert sein
+  (Schritt 2 der Installation, `provision-radius-account.sh` + Import). **Heilung:**
+  `lmnradius restart <name>` — der Entrypoint erkennt den kaputten Join (`net ads testjoin`)
+  und **joint automatisch neu** (braucht nur das `join.authfile` im secrets_dir).
 - **AD-Gruppe gelöscht und neu angelegt** (z. B. `wifi`, `role-teacher`): für RADIUS
   **unkritisch nach Wiederherstellen der Mitgliedschaften.** Beide Gates referenzieren
   Gruppen **per Name** und lösen ihn bei jeder Anfrage frisch auf (`ntlm_auth
