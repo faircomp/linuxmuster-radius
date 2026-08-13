@@ -265,6 +265,20 @@ Das veröffentlichte Image `ghcr.io/faircomp/linuxmuster-radius:0.1.2`
   Damit ist auch die Empfehlung „`role-teacher` für Lehrer *aller* Schulen" praktisch belegt,
   nicht nur aus dem Verzeichnis abgeleitet. (verifiziert)
 
+### Windows-qualifizierte Identitäten (2026-08-13, echter DC)
+
+Das Windows-SSO-Häkchen sendet `DOMAIN\user` (UPN-Clients `user@realm`). Verifiziert nach dem
+Fix (ntdomain/suffix + lokale Realms, rlm_realm-Doku: lokaler Realm = strippen + lokal bleiben):
+
+- **Matrix 9/9** via `eapol_test`: `radtest-teacher` (nackt, Regression), `EVSVBZ\radtest-teacher`,
+  `evsvbz\radtest-teacher` (Realm-Matching **case-insensitiv**, empirisch) und
+  `radtest-teacher@evsvbz.org` → je **Accept + VLAN 20**; Schüler nackt → VLAN 10; Rollen-Gate,
+  wifi-Gate und Passwortprüfung greifen **auch auf dem gestrippten Pfad** (je Reject). (verifiziert)
+- Identität auf dem Draht per `eapol_test`-Hexdump belegt (Länge 22 = genau ein Backslash).
+  **Test-Falle:** wpa_supplicant entescaped `\\` in `identity="…"` NICHT — zwei Backslashes im
+  Config-File senden zwei Backslashes (und werden korrekt abgewiesen; kein Windows-Format).
+- Auth-Log zeigt die qualifizierte Identität (`Login OK: [EVSVBZ\radtest-teacher]`). (verifiziert)
+
 `DEFAULT_IMAGE` ist auf genau diesen Digest gepinnt. **Testartefakt, kein Produktfehler:** ein
 zweiter Container mit demselben Host-Port-Mapping scheitert erwartungsgemäß mit
 `Bind for 0.0.0.0:1812 failed: port is already allocated` — pro Host also nur **eine** Instanz

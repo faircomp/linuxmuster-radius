@@ -10,6 +10,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-13
+
+**Windows-SSO-Release:** Anmeldung mit „eigene Windows-Anmeldedaten verwenden" funktioniert
+jetzt — qualifizierte Identitäten (`DOMAIN\user`, `user@realm`) werden serverseitig
+kanonisiert, **nackte Benutzernamen funktionieren unverändert weiter**.
+
+### Fixed
+- **Windows-qualifizierte Identitäten wurden abgewiesen:** das Windows-SSO-Häkchen sendet
+  `EVSVBZ\rabe`; MSCHAPv2 strippte das selbst, aber der LDAP-Lookup und das Per-SSID-Gate
+  suchten `sAMAccountName='EVSVBZ\rabe'` → Reject trotz korrektem Passwort. Jetzt laufen die
+  Stock-Policies `ntdomain` + `suffix` im inner-tunnel, und der Entrypoint definiert Workgroup
+  + DNS-Domäne als **lokale Realms** (dokumentierter rlm_realm-Weg: strippen, lokal bleiben,
+  nie proxyen). Gestrippt wird **nur bei vorhandenem Qualifier** — beide Formen gehen.
+  Verifiziert am echten DC (Matrix 9/9): `rabe`, `EVSVBZ\rabe`, `evsvbz\rabe`
+  (case-insensitiv) und `rabe@evsvbz.org` → Accept + VLAN; Rollen-/wifi-Gate und
+  Passwortprüfung greifen auch auf dem gestrippten Pfad; Ein-Label-Domänen erzeugen keinen
+  doppelten Realm (Guard im Entrypoint).
+
+### Changed
+- **`DEFAULT_IMAGE` auf das verifizierte Identitäts-Image gepinnt** (`@sha256:2dd07e23…`).
+
 ## [0.1.5] - 2026-08-05
 
 **Betriebs-Release aus dem ersten Produktiveinsatz:** sichtbare Auth-Entscheidungen im Log,

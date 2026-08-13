@@ -40,7 +40,7 @@ WPA2/WPA3-Enterprise-WLAN** mit Rollen-VLANs. Für die Tiefe je Thema:
 ## 1. RADIUS-VM — Docker + `.deb`
 ```bash
 curl -fsSL https://get.docker.com | sh                      # Docker
-VER=0.1.5
+VER=0.1.6
 curl -fsSLo lmnradius.deb \
   https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_all.deb
 sudo apt install -y ./lmnradius.deb
@@ -55,7 +55,7 @@ gezogen.
 ## 2. Auf dem linuxmuster-DC — AD vorbereiten
 Die beiden Helferskripte direkt aus dem Release laden (auf dem DC gibt es kein Repo-Checkout):
 ```bash
-VER=0.1.5        # dieselbe Version wie in Schritt 1
+VER=0.1.6        # dieselbe Version wie in Schritt 1
 BASE=https://raw.githubusercontent.com/faircomp/linuxmuster-radius/v${VER}/scripts
 curl -fsSLO ${BASE}/discover-ad-facts.sh
 curl -fsSLO ${BASE}/provision-radius-account.sh
