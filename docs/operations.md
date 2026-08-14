@@ -230,10 +230,12 @@ lmnradius reconcile      # liest den Soll-Zustand, zieht die gepinnten Digests -
   zurück.
 - Ist das **`/var/lib/samba`-Volume** verloren (kein Backup), **joint die Instanz beim
   ersten Start neu** — dafür muss das `join_secret` im `secrets_dir` liegen.
-- **Maschinenkonto (`RADIUS$`) auf dem DC gelöscht → ALLE Logins scheitern sofort**
-  (winbind-Vertrauenskanal tot). Häufigste Ursache in der Praxis (2026-08-13 real passiert):
-  `linuxmuster-import-devices` verwaltet Computerkonten **autoritativ** und räumt Konten ab,
-  die nicht in der `devices.csv` stehen — der RADIUS-Server muss dort also registriert sein
+- **Maschinenkonto (`RADIUS$`) auf dem DC gelöscht → ALLE Logins scheitern** (der laufende
+  winbind-Kanal überlebt die Löschung zunächst und täuscht Betrieb vor — der Ausfall kommt
+  beim nächsten Reconnect). Der Löschmechanismus ist **im Quellcode belegt**
+  (`sophomorix-device`, „computer accounts to kill": jedes AD-Rechnerkonto **ohne
+  devices.csv-Zeile** wird beim `--sync` gelöscht; `linuxmuster-import-devices` ruft genau
+  das auf). Der RADIUS-Server muss deshalb registriert sein
   (Schritt 2 der Installation, `provision-radius-account.sh` + Import). **Heilung:**
   `lmnradius restart <name>` — der Entrypoint erkennt den kaputten Join (`net ads testjoin`)
   und **joint automatisch neu** (braucht nur das `join.authfile` im secrets_dir).
