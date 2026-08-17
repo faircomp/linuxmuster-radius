@@ -287,3 +287,75 @@ def test_unreadable_secret_precondition_is_409(
     resp = client.post("/v1/instances", json=instance_data, headers=auth_headers)
     assert resp.status_code == 409
     assert "permission denied" in resp.json()["detail"]
+
+
+def _create(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any]
+) -> None:
+    assert client.post("/v1/instances", json=instance_data, headers=auth_headers).status_code < 300
+
+
+def test_test_endpoint_trust_only(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any]
+) -> None:
+    _create(client, auth_headers, instance_data)
+    resp = client.post(f"/v1/instances/{instance_data['name']}/test", json={}, headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["container_running"] is True
+    assert body["trust"]["ok"] is True
+    assert "login" not in body  # no user -> trust-only
+
+
+def test_test_endpoint_login_and_gates(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    instance_data: dict[str, Any],
+    docker: Any,
+) -> None:
+    _create(client, auth_headers, instance_data)
+    grp = instance_data["ssids"][0]["allowed_group"]
+    docker.test_members = {f"alice:{instance_data['wifi_group']}", f"alice:{grp}"}
+    resp = client.post(
+        f"/v1/instances/{instance_data['name']}/test",
+        json={"user": "alice", "password": "good"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["login"]["ok"] is True
+    assert any(g["member"] for g in body["gates"])
+
+
+def test_test_endpoint_wrong_password(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any]
+) -> None:
+    _create(client, auth_headers, instance_data)
+    resp = client.post(
+        f"/v1/instances/{instance_data['name']}/test",
+        json={"user": "alice", "password": "nope"},
+        headers=auth_headers,
+    )
+    assert resp.json()["login"]["code"] == "NT_STATUS_WRONG_PASSWORD"
+
+
+def test_test_endpoint_user_without_password_is_422(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any]
+) -> None:
+    _create(client, auth_headers, instance_data)
+    resp = client.post(
+        f"/v1/instances/{instance_data['name']}/test", json={"user": "alice"}, headers=auth_headers
+    )
+    assert resp.status_code == 422
+
+
+def test_test_endpoint_rejects_bad_username(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any]
+) -> None:
+    _create(client, auth_headers, instance_data)
+    resp = client.post(
+        f"/v1/instances/{instance_data['name']}/test",
+        json={"user": "a)(uid=*", "password": "x"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422

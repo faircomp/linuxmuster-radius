@@ -14,7 +14,7 @@ from __future__ import annotations
 import ipaddress
 import re
 
-from pydantic import BaseModel, computed_field, field_validator
+from pydantic import BaseModel, computed_field, field_validator, model_validator
 
 # instance name -> filename + container/volume name: no '/', '..' (case allowed).
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,30}$")
@@ -300,3 +300,35 @@ class CertIssueRequest(BaseModel):
         if not 1 <= v <= 3653:  # up to ~10y
             raise ValueError("validity_days must be between 1 and 3653")
         return v
+
+
+# Test username -> interpolated into an LDAP filter and an ntlm_auth argv inside the
+# container; a lax value would be an LDAP-filter-injection / shell-quoting sink.
+_TEST_USER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+class TestRequest(BaseModel):
+    """Body for ``POST /v1/instances/{name}/test`` — console diagnostics.
+
+    Without ``user``: winbind/trust connectivity check only. With ``user`` (then
+    ``password`` is required): additionally a real domain-login test via
+    ``ntlm_auth`` (password + wifi gate) and a per-SSID gate preview via the
+    instance's LDAP bind. The password is used for exactly one ``ntlm_auth``
+    run inside the container and is never logged or persisted.
+    """
+
+    user: str | None = None
+    password: str | None = None
+
+    @field_validator("user")
+    @classmethod
+    def _v_user(cls, v: str | None) -> str | None:
+        if v is not None and not _TEST_USER_RE.match(v):
+            raise ValueError("user must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+        return v
+
+    @model_validator(mode="after")
+    def _v_password_with_user(self) -> "TestRequest":
+        if self.user is not None and not self.password:
+            raise ValueError("password is required when user is given")
+        return self

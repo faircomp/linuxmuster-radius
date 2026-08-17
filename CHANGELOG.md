@@ -10,6 +10,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+### Added
+- **`lmnradius test <instanz> [--user <name>]`** — Domänen-Login-Diagnose von der Konsole
+  statt roher `docker exec ntlm_auth`-Aufrufe. Ohne `--user`: winbind-Trust-Check (der
+  „Maschinenkonto gelöscht"-Fall). Mit `--user`: ein echter `ntlm_auth`-Lauf (Passwort +
+  wifi-Gate, exakt der mschap-Pfad des Servers) plus Per-SSID-Gate-Vorschau; die `NT_STATUS_*`-
+  Codes werden in Klartext übersetzt, farbige `[OK]/[FAIL]`-Zusammenfassung, `--json` für
+  Skripte, Exit-Code als Zusicherung. Passwort wird verdeckt abgefragt und nie geloggt/gespeichert.
+  Neuer Endpoint `POST /v1/instances/{name}/test` (strenge Username-Validierung gegen
+  LDAP-/Shell-Injection). Reine Auswerte-Logik in `diagnostics.py` (unit-getestet).
+
 ## [0.1.6] - 2026-08-13
 
 **Windows-SSO-Release:** Anmeldung mit „eigene Windows-Anmeldedaten verwenden" funktioniert

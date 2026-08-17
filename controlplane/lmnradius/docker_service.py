@@ -28,6 +28,7 @@ from docker.errors import ImageNotFound, NotFound
 from docker.models.containers import Container
 from docker.types import LogConfig
 
+from . import diagnostics
 from .models import Instance
 from .render import render_clients_conf, render_ssid_policy
 
@@ -381,3 +382,84 @@ class DockerService:
         if grep:
             text = "\n".join(line for line in text.splitlines() if grep in line)
         return text
+
+    def _exec(self, container: Container, cmd: list[str]) -> tuple[int, str]:
+        """Run ``cmd`` (argv list, no shell) in the container; return (exit, output).
+
+        argv form means the password element is never shell-interpreted — no
+        quoting/injection surface. Output is combined stdout+stderr (ntlm_auth
+        writes its status to stdout, wbinfo mixes)."""
+        exit_code, out = container.exec_run(cmd, demux=False)
+        text = (
+            out.decode("utf-8", errors="replace")
+            if isinstance(out, (bytes, bytearray))
+            else str(out or "")
+        )
+        return int(exit_code), text
+
+    def test(self, inst: Instance, user: str | None, password: str | None) -> dict[str, Any]:
+        """Console diagnostics for an instance: winbind trust, and — with a user —
+        a real domain-login test plus a per-SSID group-gate preview.
+
+        Mirrors the mschap module the server runs per WLAN request (``ntlm_auth
+        --request-nt-key --allow-mschapv2 --require-membership-of``): the base
+        wifi gate reproduces the server exactly. The per-SSID rows check the
+        account's membership in each SSID's ``allowed_group`` — directly-assigned
+        role groups (role-teacher/role-student, <school>-teachers) match the
+        server's rlm_ldap check; nested aggregate groups (all-*) would differ
+        (token is transitive, rlm_ldap's memberOf is not — see ADR-007). The
+        password is passed as one argv element to a single ntlm_auth run and is
+        never logged or persisted.
+        """
+        container = self._get(inst.name)
+        result: dict[str, Any] = {"instance": inst.name, "container_running": False}
+        if container is None:
+            result["detail"] = "container does not exist — run 'lmnradius reconcile' first"
+            return result
+        container.reload()
+        result["container_running"] = bool((container.attrs.get("State") or {}).get("Running"))
+        if not result["container_running"]:
+            result["detail"] = (
+                "container is not running — check 'lmnradius status' / 'lmnradius logs'"
+            )
+            return result
+
+        # 1) Trust (always) — the precondition for every login.
+        result["trust"] = diagnostics.interpret_trust(*self._exec(container, ["wbinfo", "-t"]))
+
+        if user is None:
+            return result
+
+        # 2) Domain-login core: password + base wifi gate, exactly as mschap runs it.
+        wg = inst.workgroup
+        base = [
+            "ntlm_auth",
+            "--request-nt-key",
+            "--allow-mschapv2",
+            f"--domain={wg}",
+            f"--username={user}",
+            f"--password={password}",
+        ]
+        result["login"] = diagnostics.interpret_ntlm(
+            *self._exec(container, [*base, f"--require-membership-of={wg}\\{inst.wifi_group}"])
+        )
+
+        # 3) Per-SSID group-gate preview (only worth running once the password is valid).
+        gates: list[dict[str, Any]] = []
+        if result["login"]["ok"] or result["login"]["code"] == "NT_STATUS_LOGON_FAILURE":
+            for ssid in inst.ssids:
+                verdict = diagnostics.interpret_ntlm(
+                    *self._exec(
+                        container, [*base, f"--require-membership-of={wg}\\{ssid.allowed_group}"]
+                    )
+                )
+                gates.append(
+                    {
+                        "ssid": ssid.name,
+                        "group": ssid.allowed_group,
+                        "vlan": ssid.vlan,
+                        "member": verdict["ok"],
+                    }
+                )
+        result["gates"] = gates
+        return result

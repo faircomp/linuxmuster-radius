@@ -21,6 +21,7 @@ from .models import (
     CertIssueRequest,
     Instance,
     InstancePatch,
+    TestRequest,
     UpdateRequest,
 )
 from .reconciler import Reconciler
@@ -273,6 +274,15 @@ def create_app(
             return PlainTextResponse(ca.export_ca(settings.certs_dir))
         except FileNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @app.post("/v1/instances/{name}/test", dependencies=auth)
+    def test_instance(name: str, body: TestRequest) -> dict[str, Any]:
+        """Console diagnostics: winbind trust, and — with a user — a real
+        domain-login test (password + wifi gate) plus a per-SSID gate preview.
+        `def` (threadpooled): the ntlm_auth exec blocks on winbind↔DC."""
+        inst = _require(name)
+        audit.info("test instance name=%s user=%s", name, body.user or "-")
+        return docker.test(inst, body.user, body.password)
 
     @app.post(
         "/v1/instances/{name}/cert",

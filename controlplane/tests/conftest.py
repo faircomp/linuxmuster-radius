@@ -160,6 +160,46 @@ class FakeDockerService:
             lines = [line for line in lines if grep in line]
         return "\n".join(lines[-tail:])
 
+    def test(self, inst: Any, user: str | None, password: str | None) -> dict[str, Any]:
+        """In-memory stand-in mirroring the real test() shape. Membership is
+        driven by ``self.test_members`` (set of "user:GROUP"); the password
+        ``"good"`` authenticates, anything else is a wrong password."""
+        container = self.containers.get(inst.name)
+        if container is None:
+            return {"instance": inst.name, "container_running": False, "detail": "no container"}
+        if not container["running"]:
+            return {"instance": inst.name, "container_running": False, "detail": "not running"}
+        members = getattr(self, "test_members", set())
+        out: dict[str, Any] = {"instance": inst.name, "container_running": True}
+        out["trust"] = {"ok": getattr(self, "test_trust_ok", True), "detail": "stub"}
+        if user is None:
+            return out
+        pw_ok = password == "good"
+        in_wifi = f"{user}:{inst.wifi_group}" in members
+        if not pw_ok:
+            out["login"] = {
+                "ok": False,
+                "code": "NT_STATUS_WRONG_PASSWORD",
+                "detail": "wrong password",
+            }
+            out["gates"] = []
+            return out
+        out["login"] = (
+            {"ok": True, "code": "NT_STATUS_OK", "detail": "ok"}
+            if in_wifi
+            else {"ok": False, "code": "NT_STATUS_LOGON_FAILURE", "detail": "not in wifi"}
+        )
+        out["gates"] = [
+            {
+                "ssid": s.name,
+                "group": s.allowed_group,
+                "vlan": s.vlan,
+                "member": f"{user}:{s.allowed_group}" in members,
+            }
+            for s in inst.ssids
+        ]
+        return out
+
 
 @pytest.fixture
 def token() -> str:

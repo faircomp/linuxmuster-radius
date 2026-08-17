@@ -189,6 +189,75 @@ def status(name: str) -> None:
         _emit(c.get(f"/v1/instances/{name}/status"))
 
 
+def _mark(ok: bool) -> str:
+    return (
+        typer.style("  OK  ", fg=typer.colors.GREEN)
+        if ok
+        else typer.style(" FAIL ", fg=typer.colors.RED)
+    )
+
+
+def _render_test(data: dict[str, Any]) -> None:
+    """Human-readable summary of the /test diagnostics (operator console)."""
+    if not data.get("container_running"):
+        typer.secho(data.get("detail", "container not running"), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    trust = data.get("trust", {})
+    typer.echo(f"[{_mark(trust.get('ok', False))}] winbind trust  — {trust.get('detail', '')}")
+    login = data.get("login")
+    if login is None:
+        typer.echo("(no user given — trust-only check; add --user <name> to test a domain login)")
+        return
+    typer.echo(f"[{_mark(login['ok'])}] domain login   — {login['detail']} ({login['code']})")
+    for g in data.get("gates", []):
+        vlan = f" -> VLAN {g['vlan']}" if g.get("vlan") is not None else ""
+        typer.echo(
+            f"[{_mark(g['member'])}] SSID {g['ssid']}  — member of {g['group']}?{vlan if g['member'] else ''}"
+        )
+    if not login["ok"]:
+        raise typer.Exit(1)
+    if data.get("gates") and not any(g["member"] for g in data["gates"]):
+        typer.secho(
+            "note: login OK but the user is in NONE of the configured SSID groups — every SSID would reject.",
+            fg=typer.colors.YELLOW,
+        )
+
+
+@app.command()
+def test(
+    name: str,
+    user: Optional[str] = typer.Option(
+        None, "--user", "-u", help="domain user to test a real login for (bare sAMAccountName)"
+    ),
+    password: Optional[str] = typer.Option(
+        None, help="password (prompted hidden if --user is given and this is omitted)"
+    ),
+    json_out: bool = typer.Option(False, "--json", help="raw JSON instead of the readable summary"),
+) -> None:
+    """Diagnose an instance from the console: winbind trust, and — with --user —
+    a real domain-login test (password + wifi gate) and a per-SSID gate preview.
+
+    Without --user it only checks the DC trust. With --user it runs ntlm_auth
+    exactly as the server does per WLAN request. The password is prompted
+    hidden, sent once over the local API, used for one ntlm_auth run in the
+    container, and never stored."""
+    body: dict[str, Any] = {}
+    if user is not None:
+        body["user"] = user
+        if not password:
+            password = typer.prompt("Password", hide_input=True)
+        body["password"] = password
+    with _get_client() as c:
+        resp = c.post(f"/v1/instances/{name}/test", json=body)
+    if resp.status_code >= 400:
+        typer.secho(f"error {resp.status_code}: {resp.text}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(resp.json(), indent=2, ensure_ascii=False))
+        return
+    _render_test(resp.json())
+
+
 def _log_params(
     tail: int, since: Optional[int], until: Optional[int], grep: Optional[str]
 ) -> dict[str, Any]:

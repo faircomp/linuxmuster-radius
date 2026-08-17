@@ -149,6 +149,39 @@ lmnradius status default-school                 # exists/running/health/image
 lmnradius logs   default-school --tail 100 --grep Reject   # Access-Accept/Reject je User/SSID
 ```
 
+### Domänen-Login von der Konsole testen — `lmnradius test`
+
+Statt roher `docker exec … ntlm_auth`-Aufrufe: `lmnradius test` fährt genau die
+Auth-Kette, die der Server je WLAN-Anfrage nutzt (`ntlm_auth --require-membership-of`),
+und übersetzt die `NT_STATUS_*`-Codes in Klartext.
+
+```
+lmnradius test default-school                       # nur Trust-Check (winbind <-> DC)
+lmnradius test default-school --user rabe           # + echter Domänen-Login (Passwort wird verdeckt abgefragt)
+lmnradius test default-school --user rabe --json    # dieselben Daten als JSON (für Skripte/CI)
+```
+
+Beispielausgabe mit `--user`:
+
+```
+[  OK  ] winbind trust  — winbind trust to the DC is up (RPC calls succeeded)
+[  OK  ] domain login   — password correct and group membership satisfied (NT_STATUS_OK)
+[  OK  ] SSID MSG-LEHRER  — member of role-teacher? -> VLAN 1172
+```
+
+- **Ohne `--user`:** nur der Trust — beantwortet „ist der winbind-Kanal / das Maschinenkonto
+  gesund?" (der `RADIUS$`-gelöscht-Fall). Trust `FAIL` → `lmnradius restart <name>` (Re-Join).
+- **Mit `--user`:** `domain login` ist die **exakte** mschap-Prüfung des Servers (Passwort +
+  `wifi`-Gate). Die `SSID …`-Zeilen zeigen je konfigurierter SSID, ob der Nutzer in der
+  geforderten Rollengruppe ist — für **direkt** zugewiesene Gruppen (`role-teacher`,
+  `<schule>-teachers`) deckt sich das mit dem rlm_ldap-Gate; verschachtelte `all-*`-Aggregate
+  würden abweichen (Token transitiv vs. `memberOf` direkt, ADR-007).
+- **Das Passwort** wird verdeckt abgefragt, einmal über die lokale API an genau einen
+  `ntlm_auth`-Lauf im Container gereicht und **nie** geloggt oder gespeichert.
+- **Exit-Code:** `0` nur, wenn der Login-Teil (falls `--user`) erfolgreich war — taugt so als
+  Zusicherung in Skripten. Die **volle** PEAP-/VLAN-Kette inkl. AP-Secret prüft weiterhin
+  `eapol_test` aus dem AP-Subnetz (siehe unten) bzw. ein echter Client mit `lmnradius logs`.
+
 - **Audit-Log:** jede API-Mutation (create/update/rollback/cert issue/…) geht an den Logger
   **`lmnradius.audit`** → syslog/journal.
 - **Docker-Daemon weg:** die API antwortet mit **`503`** (nicht mit einem rohen `500`) und
