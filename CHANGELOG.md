@@ -20,6 +20,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
   Neuer Endpoint `POST /v1/instances/{name}/test` (strenge Username-Validierung gegen
   LDAP-/Shell-Injection). Reine Auswerte-Logik in `diagnostics.py` (unit-getestet).
 
+### Changed
+- **`lmnradius logs` gibt jetzt echte Zeilen aus** statt eines JSON-Blobs mit escapten `\n`
+  (die Log-Zeilen waren dadurch praktisch unlesbar). Der Text wird direkt mit echten
+  Zeilenumbrüchen gedruckt; `--json` liefert weiterhin die umschlossene Form für Skripte.
+  (Reine Control-Plane-Änderung — kommt mit dem `.deb`, kein Image-Update nötig.)
+- **Weniger Rauschen im Auth-Log:** der stunnel-LDAP-Terminator läuft jetzt mit
+  `debug = 4` (nur Warnungen/Fehler). Die routinemäßigen `LOG5[..] Service [ldap] connected`-
+  Notice-Zeilen pro LDAP-Verbindung, die sich zuvor zwischen die Auth-Entscheidungen mischten,
+  entfallen; echte stunnel-Warnungen/-Fehler bleiben sichtbar. (Image-Änderung — wird mit dem
+  nächsten Image-Update wirksam.)
+
 ## [0.1.6] - 2026-08-13
 
 **Windows-SSO-Release:** Anmeldung mit „eigene Windows-Anmeldedaten verwenden" funktioniert

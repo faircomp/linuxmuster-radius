@@ -58,6 +58,25 @@ def test_cli_lifecycle_read_commands(
     assert runner.invoke(cli.app, ["logs", NAME]).exit_code == 0
 
 
+def test_cli_logs_renders_plain_lines(
+    patch_client: None, app: Any, token: str, instance_data: dict[str, Any]
+) -> None:
+    _seed(app, token, instance_data)
+
+    # Default: raw log text with real newlines, not a JSON blob with escaped \n.
+    r = runner.invoke(cli.app, ["logs", NAME])
+    assert r.exit_code == 0, r.output
+    assert '{"logs"' not in r.output
+    assert "\\n" not in r.output
+    assert "radiusd: Ready to process requests" in r.output
+    assert r.output.count("\n") >= 2  # multiple real lines
+
+    # --json keeps the wrapped form for scripting.
+    rj = runner.invoke(cli.app, ["logs", NAME, "--json"])
+    assert rj.exit_code == 0, rj.output
+    assert '"logs"' in rj.output
+
+
 def test_cli_update_and_rollback(
     patch_client: None, app: Any, token: str, instance_data: dict[str, Any]
 ) -> None:
