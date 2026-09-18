@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# From linuxmusterDEV/templates/release.yml, modeled on lmndev-runner/workflows/*.release.yml:
+# version and distribution come from the top entry of debian/changelog; the tag must match
+# it. No publish job yet (no faircomp/deb archive); add the upstream publish job when the
+# archive exists.
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          VERSION=$(dpkg-parsechangelog -S Version)
+          DIST=$(dpkg-parsechangelog -S Distribution); NUM="${DIST#lmn}"
+          TAGVER="${GITHUB_REF_NAME#v}"; TAGVER="${TAGVER//-rc/~rc}"   # v7.3.1-rc1 -> 7.3.1~rc1
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$TAGVER" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match debian/changelog version $VERSION"; exit 1; fi
+          if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then IMG=ghcr.io/linuxmuster/lmndev-runner:latest; else IMG=ghcr.io/linuxmuster/lmndev-runner:24.04; fi
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"; echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: gate
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.gate.outputs.image }}
+      options: --user root
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build package (make deb wraps packaging/build-deb.sh)
+        run: |
+          # No debian/control at the root yet (that is the debian/ conversion PR), so
+          # install what build-deb.sh needs by hand instead of `apt-get build-dep`.
+          apt-get update -qq && apt-get install -y -qq python3-venv
+          make deb
+          mkdir -p output && mv ./linuxmuster-radius_*.deb output/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: output/
+          if-no-files-found: error
+
+  install-smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: packages/
+      - name: Install and use the package like an admin would
+        run: |
+          set -eux
+          sudo apt-get update -qq
+          sudo apt-get install -y ./packages/*.deb
+          test "$(command -v lmnradius)" = /usr/bin/lmnradius
+          sudo lmnradius --help >/dev/null
+          ok=0
+          for i in $(seq 1 30); do
+            if sudo lmnradius health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then
+            systemctl status linuxmuster-radius.service --no-pager || true
+            sudo journalctl -u linuxmuster-radius.service --no-pager | tail -50 || true
+            exit 1
+          fi
+          sudo lmnradius health
+
+  release:
+    needs: [gate, build, install-smoke]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: packages/
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          # .changes/.buildinfo join the assets with the debian/ conversion (dpkg-buildpackage).
+          files: packages/*.deb
+          generate_release_notes: true
