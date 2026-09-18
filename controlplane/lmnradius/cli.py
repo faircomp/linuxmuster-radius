@@ -278,10 +278,21 @@ def logs(
     since: Optional[int] = typer.Option(None, help="only lines after this Unix epoch second"),
     until: Optional[int] = typer.Option(None, help="only lines before this Unix epoch second"),
     grep: Optional[str] = typer.Option(None, help="substring filter"),
+    json_out: bool = typer.Option(False, "--json", help="raw JSON instead of plain log lines"),
 ) -> None:
-    """Show recent container log lines (radiusd), optional time/substring filter."""
+    """Show recent container log lines (radiusd), optional time/substring filter.
+
+    Prints the log as real lines (not a JSON blob with escaped \\n). Use --json
+    for the wrapped form."""
     with _get_client() as c:
-        _emit(c.get(f"/v1/instances/{name}/logs", params=_log_params(tail, since, until, grep)))
+        resp = c.get(f"/v1/instances/{name}/logs", params=_log_params(tail, since, until, grep))
+    if resp.status_code >= 400:
+        typer.secho(f"error {resp.status_code}: {resp.text}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(resp.json(), indent=2, ensure_ascii=False))
+        return
+    typer.echo(resp.json().get("logs", "").rstrip("\n"))
 
 
 @app.command()

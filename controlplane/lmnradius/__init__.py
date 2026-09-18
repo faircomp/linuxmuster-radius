@@ -5,10 +5,7 @@
 Manages the FreeRADIUS WLAN data plane (one FreeRADIUS container per
 linuxmuster server, SSID branching handled inside it) through the docker-py
 SDK and exposes them via a FastAPI REST API with a thin Typer CLI client.
+
+The version is not spelled out here: ``importlib.metadata.version("lmnradius")``
+returns the one debian/changelog defines (fed in by setup.py at build time).
 """
-
-from __future__ import annotations
-
-__version__ = "0.1.6"
-
-__all__ = ["__version__"]

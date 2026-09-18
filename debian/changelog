@@ -1,0 +1,136 @@
+linuxmuster-radius (7.3.0) lmn73; urgency=medium
+
+  * Switch to the linuxmuster.net version scheme (7.<line>.<n>, distribution lmn73).
+  * debian/changelog is the single version source: the .deb, the Python package
+    and GET /v1/version all report it (no more hand-edited version in four files).
+  * Add `lmnradius test <instance> [--user <name>]`: domain-login diagnostics
+    from the console. Without --user a winbind trust check (the "machine account
+    deleted" case); with --user one real ntlm_auth MSCHAPv2 run (password + wifi
+    gate, exactly the server's mschap path) plus a per-SSID gate preview.
+    NT_STATUS_* codes are translated, --json for scripts, exit code as the
+    assertion; the password is prompted hidden and never logged or stored. New
+    endpoint POST /v1/instances/{name}/test with strict username validation.
+  * `lmnradius logs` prints real log lines instead of a JSON blob with escaped
+    newlines; --json keeps the wrapped form for scripts.
+  * Security fix for servers upgraded from 0.1.6 or earlier: the postinst now
+    clears the group/world write bits under /opt/linuxmuster-radius on every
+    configure. Those releases shipped that tree world-writable; an upgrade reset
+    the files but left 421 directories at 0777 -- among them the venv's
+    site-packages, where any local user could drop a .pth file that then executes
+    as lmnradius, who is in the docker group.
+  * Quieter auth log: the stunnel LDAP-TLS terminator runs at debug=4 (warnings
+    and errors only); takes effect with the next image update.
+  * Add `make deb`; CI builds the package in ghcr.io/linuxmuster/lmndev-runner:24.04
+    and install-smokes it on ubuntu-24.04; a tag v<version> releases it after a
+    tag == changelog gate (replaces build-deb.yml).
+  * Unify the maintainer address to Kevin Stenzel <mail@kevin-stenzel.de>.
+  * docs: linuxmuster-import-devices deletes any machine account without a
+    devices.csv row, which kills every login until `lmnradius restart` re-joins;
+    register the RADIUS VM in devices.csv. install.md no longer hard-codes a
+    release version and calls the real-world deployment a pilot.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Fri, 18 Sep 2026 10:00:00 +0200
+
+linuxmuster-radius (0.1.6) lmn73; urgency=medium
+
+  * Windows SSO release: qualified identities (DOMAIN\user, user@realm) are
+    canonicalised server-side; bare usernames keep working. The stock ntdomain +
+    suffix policies run in the inner tunnel and the entrypoint defines workgroup
+    + DNS domain as local realms (strip, stay local, never proxy). Verified on a
+    real DC (matrix 9/9); single-label domains do not create a duplicate realm.
+  * Pin DEFAULT_IMAGE to the verified identity image.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Thu, 13 Aug 2026 16:05:24 +0200
+
+linuxmuster-radius (0.1.5) lmn73; urgency=medium
+
+  * Pin DEFAULT_IMAGE to the auth-logging image, pulled by digest and verified
+    against a real DC (fresh state volume, healthy in 18s, PEAP matrix 7/7 with
+    --wifi-group all-wifi, VLAN 20/10 decoded).
+  * Log auth decisions (log { auth = yes }): `lmnradius logs` shows Login OK /
+    Login incorrect with user and reason; passwords are still never logged.
+  * The API surfaces the apply-path precondition errors (missing EAP cert with
+    the `lmnradius cert issue` hint, missing or unreadable secret file) as 409
+    with a plain-text detail instead of a bare Internal Server Error.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Wed, 05 Aug 2026 10:26:54 +0200
+
+linuxmuster-radius (0.1.4) lmn73; urgency=medium
+
+  * Hotfix: ship the packaged symlink /usr/bin/lmnradius. The CLI was missing
+    from PATH on v0.1.0-v0.1.3 (postinst used the full venv path and masked it).
+  * CI install smoke test in build-deb: install the built package and use it
+    like the docs say (command -v lmnradius, --help, service start, health).
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Tue, 04 Aug 2026 14:48:39 +0200
+
+linuxmuster-radius (0.1.3) lmn73; urgency=medium
+
+  * Pin DEFAULT_IMAGE to the :0.1.2 release image, verified against a real
+    linuxmuster DC (fresh state volume, healthy in 6s, ntlm_auth matrix, PEAP
+    matrix 7/7 with role-teacher -> VLAN 20 / role-student -> VLAN 10).
+  * Pin the CI gate tools (ruff/mypy/reuse/pytest); a Renovate customManager
+    bumps them as reviewable PRs.
+  * docs: the join account is partially verified (a plain user fails with
+    Insufficient access; an administrator/delegated account works).
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Tue, 04 Aug 2026 14:03:01 +0200
+
+linuxmuster-radius (0.1.2) lmn73; urgency=medium
+
+  * provision-radius-account.sh wrote the sophomorixRole into devices.csv
+    field 3 instead of field 9 (only field 9 decides whether a computer account
+    is created). It now emits the documented 15-field layout (role in field 9,
+    hardware class nopxe, PXE flag 0), overridable via DEVICE_ROOM/DEVICE_GROUP/
+    DEVICE_ROLE, and warns before appending on a differing field count.
+  * discover-ad-facts.sh no longer reports admin classes as schools; the school
+    list comes from /etc/linuxmuster/sophomorix/*/.
+  * docs: rlm_ldap checks memberOf directly, not recursively; install.md and
+    README brought up to date.
+  * docs: cross-school WLAN guidance (role-teacher/role-student cover all
+    schools; all-* aggregates do not work because memberOf is not transitive).
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Tue, 04 Aug 2026 13:08:21 +0200
+
+linuxmuster-radius (0.1.1) lmn73; urgency=medium
+
+  * First runtime release: the data plane is proven on a real linuxmuster DC
+    (member join, PEAP-MSCHAPv2 via winbind, per-role VLAN).
+  * rlm_ldap over ldaps:// crashed the threaded FreeRADIUS (GnuTLS vs OpenSSL);
+    LDAP TLS is now terminated by a local stunnel (ADR-015).
+  * The supervisor no longer tears down healthy containers (kill -0 returned
+    EPERM under cap-drop ALL); liveness via /proc/<pid>.
+  * The per-SSID gate rejected every SSID: rewrite_called_station_id now runs in
+    the inner tunnel.
+  * Domain join: net ads join without MEMBER, kerberos method = secrets only,
+    the join needs an admin/delegated account.
+  * Config assembly under the hardened profile: cp --preserve=mode, chmod before
+    chown, overwrite clients.conf instead of appending.
+  * discover-ad-facts.sh treats all-*/global-* as cross-school aggregates.
+  * Add stunnel4 to the image with an optional DC certificate check via LDAP_CA.
+  * Renovate customManager for the DEFAULT_IMAGE digest pin plus a self-hosted
+    renovate.yml workflow.
+  * Add docs/install.md and the live E2E verification log in docs/references.md.
+  * Pin DEFAULT_IMAGE to the E2E-verified GHCR image.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Mon, 13 Jul 2026 08:34:53 +0200
+
+linuxmuster-radius (0.1.0) lmn73; urgency=medium
+
+  * First release: the complete linuxmuster-radius delivery (P0-P6).
+  * Data-plane image: FreeRADIUS 3.2 on Ubuntu 24.04 joining Samba AD as a
+    member (winbind), PEAP-MSCHAPv2 via ntlm_auth, per-SSID gating, tini as
+    PID 1, healthcheck (wbinfo -t + radclient status probe), read-only rootfs.
+  * Control plane: FastAPI REST API + Typer CLI (thin client), git-backed YAML
+    store, reconciler, digest-pinned health-gated updater, rendered clients.conf
+    and ssid-policy per instance.
+  * Dedicated single-purpose EAP-CA: `lmnradius ca init`, `cert issue`,
+    `ca export`, `ca show`, `cert show`.
+  * Deployment docs: AD member setup, UniFi/OPNsense, client trust via GPO/MDM;
+    scripts discover-ad-facts.sh and provision-radius-account.sh.
+  * Packaging: .deb with a hermetic venv under /opt/linuxmuster-radius/venv and
+    a hardened systemd unit; CI (ci.yml, build-image.yml, build-deb.yml).
+  * crabbox E2E harness: Samba AD DC + joined FreeRADIUS + eapol_test
+    supplicant, 5-case PEAP matrix.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Fri, 10 Jul 2026 12:29:49 +0200

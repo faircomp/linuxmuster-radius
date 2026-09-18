@@ -26,7 +26,7 @@ build/
 debian/.debhelper/
 debian/files
 debian/*.substvars
-debian/linuxmuster-squid/
+debian/linuxmuster-radius/
 *.deb
 *.buildinfo
 *.changes

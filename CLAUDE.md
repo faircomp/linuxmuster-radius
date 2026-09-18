@@ -27,11 +27,30 @@ assumptions in [`docs/threat-model.md`](docs/threat-model.md), the decisions in
 | CLI | `controlplane/lmnradius/cli.py` | Python · Typer · httpx (thin client of the REST API, **no direct Docker**) |
 | EAP-CA / Cert manager | `controlplane/lmnradius/ca.py` | Private single-purpose EAP-CA (`ca init` / `cert issue` / `ca export`) |
 | E2E / Deploy | `deploy/` | docker-compose (Samba AD DC + joined FreeRADIUS + `eapol_test`), instance YAML, client GPO/MDM templates |
-| Packaging | `packaging/debian/` | `.deb` via dh-virtualenv, hardened systemd service (lmn73 layout) |
+| Packaging | `packaging/` (`make deb`), `debian/changelog` | `.deb` via `packaging/build-deb.sh` (hermetic venv under `/opt`), hardened systemd service (lmn73 layout) |
 | Tests | `scripts/tests/` | `run.sh` aggregator; heavy tier on **crabbox** (`eapol_test` E2E) |
 
 > **The stack is deliberately Python** (linuxmuster-api7/webui7 are likewise FastAPI/
 > Python) — set as the default, overridable (see the ADR in `docs/decisions.md`).
+
+## Hub and conventions
+
+This is one of Kevin's own linuxmuster.net packages. The development hub is
+`../../CLAUDE.md` (linuxmusterDEV: layout, lab, workflows); the approved package
+conventions are `../../docs/paket-konventionen.md` there. The rules that bite here:
+
+- **Version:** the top entry of `debian/changelog` is the only hand-edited version
+  (`7.3.N`, distribution `lmn73`, no `-0` revision). `packaging/build-deb.sh`
+  (`dpkg-parsechangelog`), `controlplane/setup.py` (`pyproject.toml` is `dynamic`) and
+  `GET /v1/version` (`importlib.metadata`) derive from it — never write a version
+  anywhere else (not in `docs/install.md` either). Never bump it outside a release:
+  Kevin sets it and tags `v7.3.N`; `release.yml` refuses a tag that does not match
+  the changelog.
+- **Changelog:** one bullet in the top block of `debian/changelog` per user-visible change,
+  in the same PR, written for admins in English. There is no `CHANGELOG.md`.
+- **Build:** `make deb` (wraps `packaging/build-deb.sh`; needs root, so run it in
+  `ghcr.io/linuxmuster/lmndev-runner:24.04` like CI does — the command is in the `Makefile`).
+- **Maintainer string** everywhere: `Kevin Stenzel <mail@kevin-stenzel.de>`.
 
 **Security pitfalls (from the threat model — do not violate):**
 
@@ -174,7 +193,7 @@ Samba/winbind, Docker, and the secure operation of school/network infrastructure
 
 A code change without a matching docs update counts as incomplete. Before "done", check:
 `docs/architecture.md`, `docs/threat-model.md`, `docs/test-strategy.md`,
-`docs/decisions.md` (ADRs), `README.md`, `CHANGELOG.md` (from the first version onward). The docs update belongs
+`docs/decisions.md` (ADRs), `README.md`, `debian/changelog` (top block, admin-facing bullet). The docs update belongs
 in **the same commit** as the code change. Wrong docs are a bug —
 fix them, even if not directly part of the change.
 

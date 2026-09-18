@@ -162,6 +162,9 @@ case "${_scheme}" in
         printf 'foreground = yes\n'
         printf 'pid =\n'
         printf 'syslog = no\n'
+        # warning+ only: drop the per-connection LOG5 "Service [ldap] connected"
+        # notices that otherwise interleave with (and drown out) the auth log.
+        printf 'debug = 4\n'
         printf 'sslVersionMin = TLSv1.2\n'
         printf '[ldap]\n'
         printf 'client = yes\n'

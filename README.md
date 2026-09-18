@@ -13,9 +13,10 @@ und **erzwungene Server-Zertifikatsprüfung** gegen eine dedizierte EAP-CA —
 **eine** self-contained FreeRADIUS-Instanz pro Server, verwaltet über
 **REST-API + CLI** auf einer **eigenen RADIUS-VM**.
 
-> **Status:** **`v0.1.6`** — vollständig (P0–P6); die Data-Plane ist an einem echten
+> **Status:** vollständig (P0–P6); die Data-Plane ist an einem echten
 > linuxmuster-Setup **runtime-bewiesen** (Member-Join, PEAP-MSCHAPv2 via winbind,
-> Per-Rollen-VLAN). Details in **[`CHANGELOG.md`](CHANGELOG.md)**.
+> Per-Rollen-VLAN). Details in **[`debian/changelog`](debian/changelog)** (Versionen `7.3.N`
+> für linuxmuster.net 7.3, Releases auf GitHub).
 > Erledigt: Image auf **GHCR** veröffentlicht + Digest gepinnt, und der
 > **Laufzeit-Beweis** (separate-VM-Member + winbind + PEAP + Rollen-VLAN) ist an einem
 > echten linuxmuster-DC erbracht — beides bewiesen, nicht angenommen.
@@ -86,7 +87,7 @@ git-versioniert verwaltet über **REST-API + Typer-CLI**.
 | Control Plane (REST-API) | `controlplane/lmnradius/` | Python 3.11+ · FastAPI · uvicorn · **docker-py** (Container-Lifecycle) · pydantic v2 |
 | CLI | `controlplane/lmnradius/cli.py` | Python · Typer · httpx (Thin Client der REST-API) |
 | E2E / Deploy | `deploy/` | docker-compose (Samba AD DC + gejointer FreeRADIUS + `eapol_test`), Instanz-Definitionen |
-| Packaging | `packaging/debian/` | `.deb` via dh-virtualenv, gehärteter systemd-Dienst |
+| Packaging | `packaging/` (`make deb`), `debian/changelog` | `.deb` via `packaging/build-deb.sh` (hermetisches venv unter `/opt`), gehärteter systemd-Dienst |
 | Tests | `scripts/tests/` | `run.sh`-Aggregator; Heavy-Tier auf **crabbox** |
 
 Details: [`docs/architecture.md`](docs/architecture.md).

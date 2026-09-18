@@ -51,6 +51,15 @@ if command -v git >/dev/null 2>&1 && [ ! -d "$INST_DIR/.git" ]; then
     chown -R lmnradius:lmnradius "$INST_DIR/.git" || true
 fi
 
+# Harden the shipped tree on EVERY configure, not only on upgrade: 0.1.6 and earlier
+# shipped /opt/linuxmuster-radius world-writable (0777 directories, 0666 files). dpkg
+# resets the mode of every file it replaces but leaves EXISTING directories untouched, so
+# a server upgraded from 0.1.6 keeps world-writable directories -- among them
+# venv/lib/python3.12/site-packages, where a dropped .pth file runs as lmnradius, and
+# lmnradius is in the docker group. Only the write bits are cleared (`go-w`, never a
+# blanket 0755), so anything intentionally restrictive stays as restrictive as it was.
+chmod -R go-w /opt/linuxmuster-radius
+
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
     systemctl enable linuxmuster-radius.service || true
