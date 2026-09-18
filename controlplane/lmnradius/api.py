@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
+from importlib.metadata import version as dist_version
 from typing import Any
 
 from docker.errors import DockerException
@@ -111,7 +112,9 @@ def create_app(
 
     @app.get("/v1/version", dependencies=auth)
     async def version() -> dict[str, str]:
-        return {"version": settings.version}
+        # The installed package carries the debian/changelog version (setup.py), so
+        # this is exactly what `dpkg -s linuxmuster-radius` says.
+        return {"version": dist_version("lmnradius")}
 
     # NOTE: the endpoints below do blocking docker-py / health-poll work; they are
     # plain `def` so FastAPI runs them in a threadpool instead of stalling the event

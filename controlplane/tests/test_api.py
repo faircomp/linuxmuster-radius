@@ -10,6 +10,7 @@ Docker daemon (503).
 
 from __future__ import annotations
 
+from importlib.metadata import version as dist_version
 from typing import Any
 
 from starlette.testclient import TestClient
@@ -29,7 +30,8 @@ def test_health_needs_no_auth(client: TestClient) -> None:
 def test_version(client: TestClient, auth_headers: dict[str, str]) -> None:
     resp = client.get("/v1/version", headers=auth_headers)
     assert resp.status_code == 200
-    assert "version" in resp.json()
+    # Single version source: what the package metadata says (fed from debian/changelog).
+    assert resp.json() == {"version": dist_version("lmnradius")}
 
 
 def test_missing_token_is_401(client: TestClient) -> None:

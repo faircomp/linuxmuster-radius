@@ -174,7 +174,7 @@ Samba/winbind, Docker, and the secure operation of school/network infrastructure
 
 A code change without a matching docs update counts as incomplete. Before "done", check:
 `docs/architecture.md`, `docs/threat-model.md`, `docs/test-strategy.md`,
-`docs/decisions.md` (ADRs), `README.md`, `CHANGELOG.md` (from the first version onward). The docs update belongs
+`docs/decisions.md` (ADRs), `README.md`, `debian/changelog` (top block, admin-facing bullet). The docs update belongs
 in **the same commit** as the code change. Wrong docs are a bug —
 fix them, even if not directly part of the change.
 

@@ -7,12 +7,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lmnradius"
-version = "0.1.6"
+# The version is the top entry of ../debian/changelog (single version source);
+# setup.py feeds it to setuptools at build time.
+dynamic = ["version"]
 description = "REST API + CLI managing the FreeRADIUS WLAN control plane"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
-authors = [{ name = "Kevin Stenzel", email = "kevin@ks98.de" }]
+authors = [{ name = "Kevin Stenzel", email = "mail@kevin-stenzel.de" }]
 dependencies = [
     "fastapi",
     "uvicorn[standard]",

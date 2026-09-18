@@ -1,7 +1,7 @@
 Package: linuxmuster-radius
 Version: @VERSION@
 Architecture: all
-Maintainer: Kevin Stenzel <kevin@ks98.de>
+Maintainer: Kevin Stenzel <mail@kevin-stenzel.de>
 Section: admin
 Priority: optional
 Depends: python3 (>= 3.11), adduser, openssl, git

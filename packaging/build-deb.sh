@@ -4,11 +4,14 @@
 #
 # Builds the linuxmuster-radius .deb with a hermetic Python venv under
 # /opt/linuxmuster-radius/venv (built at the target path so the shebangs are correct)
-# + systemd unit + maintainer scripts. RUN AS ROOT. VERSION via env.
+# + systemd unit + maintainer scripts. RUN AS ROOT (or `make deb` in the lmndev-runner
+# container). The version is the top entry of debian/changelog, the single version
+# source; VERSION=<x> in the environment overrides only the .deb metadata (the venv's
+# Python package always carries the changelog version via controlplane/setup.py).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-$(dpkg-parsechangelog -l "$ROOT/debian/changelog" -S Version)}"
 case "$VERSION" in
     ""|*[!0-9A-Za-z.+~-]*) echo "invalid VERSION: '$VERSION'" >&2; exit 1 ;;
 esac
