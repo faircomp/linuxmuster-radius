@@ -12,6 +12,12 @@ linuxmuster-radius (7.3.0) lmn73; urgency=medium
     endpoint POST /v1/instances/{name}/test with strict username validation.
   * `lmnradius logs` prints real log lines instead of a JSON blob with escaped
     newlines; --json keeps the wrapped form for scripts.
+  * Security fix for servers upgraded from 0.1.6 or earlier: the postinst now
+    clears the group/world write bits under /opt/linuxmuster-radius on every
+    configure. Those releases shipped that tree world-writable; an upgrade reset
+    the files but left 421 directories at 0777 -- among them the venv's
+    site-packages, where any local user could drop a .pth file that then executes
+    as lmnradius, who is in the docker group.
   * Quieter auth log: the stunnel LDAP-TLS terminator runs at debug=4 (warnings
     and errors only); takes effect with the next image update.
   * Add `make deb`; CI builds the package in ghcr.io/linuxmuster/lmndev-runner:24.04
