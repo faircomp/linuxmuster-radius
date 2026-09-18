@@ -22,8 +22,11 @@ HEAD = re.compile(r"^\S+ \((?P<version>[^)]+)\) ")
 
 
 def changelog_version() -> str:
-    with CHANGELOG.open(encoding="utf-8") as fh:
-        first = fh.readline()
+    try:
+        with CHANGELOG.open(encoding="utf-8") as fh:
+            first = fh.readline()
+    except FileNotFoundError:
+        raise SystemExit(f"{CHANGELOG} missing: build from the repo checkout") from None
     match = HEAD.match(first)
     if match is None:
         raise SystemExit(f"{CHANGELOG}: cannot parse a version from {first!r}")

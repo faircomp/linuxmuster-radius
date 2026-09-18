@@ -77,6 +77,10 @@ jobs:
             exit 1
           fi
           sudo lmnradius health
+          # Single version source: the venv's package metadata equals the .deb version
+          # (~rc -> rc in PEP 440). No `lmnradius version` command yet, so ask importlib.
+          ver="$(dpkg-query -W -f='${Version}' linuxmuster-radius)"
+          test "$(sudo /opt/linuxmuster-radius/venv/bin/python -c 'from importlib.metadata import version; print(version("lmnradius"))')" = "${ver//\~/}"
 
   release:
     needs: [gate, build, install-smoke]
