@@ -184,10 +184,13 @@ jobs:
 
           # ---------------------------------------------------------------- state BEFORE
           # The state an admin has on a running server, created exactly the way
-          # docs/install.md tells them to. Everything below goes through the control-plane
-          # API, so wait for it first (the postinst starts the service).
-          for _ in $(seq 1 30); do sudo lmnradius health >/dev/null 2>&1 && break; sleep 1; done
-          sudo lmnradius health
+          # docs/install.md tells them to. The RELEASED version's CLI is driven from the
+          # venv, not from /usr/bin: v0.1.0..v0.1.3 shipped without that symlink, and an
+          # old prev_tag must not fall over a missing one. Everything goes through the
+          # control-plane API, so wait for it first (the postinst starts the service).
+          old_cli=/opt/linuxmuster-radius/venv/bin/lmnradius
+          for _ in $(seq 1 30); do sudo "$old_cli" health >/dev/null 2>&1 && break; sleep 1; done
+          sudo "$old_cli" health
 
           # install.md step 3 - the three secret files, owner lmnradius, mode 0600.
           for s in join.authfile ldap-bind.secret radius.secret; do
@@ -197,7 +200,7 @@ jobs:
           done
 
           # install.md step 4 - the EAP CA. Pure crypto: no DC, no Docker.
-          sudo lmnradius ca init --passphrase ci
+          sudo "$old_cli" ca init --passphrase ci
 
           # install.md step 5 - the instance record. `create` also reconciles and the
           # container cannot come up here (no DC), but Reconciler.apply() stores the
@@ -208,7 +211,15 @@ jobs:
           # first, not a wait. ldap:// on purpose: from 7.3.1 on an ldaps:// instance must
           # pin a CA with --ldap-ca, a flag the older releases this job can upgrade from
           # (prev_tag=v0.1.6) do not have.
-          sudo timeout 300 lmnradius create --name ci \
+          # The fixture pins the data-plane image of the previous package line, i.e. what
+          # an instance created by an earlier .deb still runs. It MUST differ from this
+          # package's DEFAULT_IMAGE (asserted after the upgrade): update_all() skips every
+          # instance that is already on the target, so with the default pinned the
+          # postinst's update path would silently do nothing and the assertions below
+          # would pass without it ever having run.
+          fixture_image='ghcr.io/faircomp/linuxmuster-radius@sha256:2dd07e23e01b7f97614164266c68c60f96c2fcc0feac4cb1c2adf0a2ba7ad894'
+          sudo timeout 300 "$old_cli" create --name ci \
+            --image "$fixture_image" \
             --realm LINUXMUSTER.LAN --workgroup LINUXMUSTER \
             --server-fqdn radius.linuxmuster.lan \
             --ldap-server ldap://dc.linuxmuster.lan \
@@ -222,7 +233,7 @@ jobs:
             --radius-secret radius.secret || true
           sudo test -f /var/lib/linuxmuster-radius/instances/ci.yaml
           sudo test -f /var/lib/linuxmuster-radius/instance.d/ci/clients.conf
-          sudo lmnradius cert issue ci --passphrase ci
+          sudo "$old_cli" cert issue ci --passphrase ci
 
           # The instance record is compared FIELD BY FIELD, never by checksum: the record
           # is written by the software, not by the admin. 7.3.1 legitimately added
@@ -277,6 +288,12 @@ jobs:
           after_pid="$(systemctl show -p MainPID --value linuxmuster-radius.service)"
           echo "postinst upgrade branch ran: MainPID $before_pid -> $after_pid"
           test "$before_pid" != "$after_pid"
+          # ... and update-all, the second thing that branch does, reached the instance.
+          # Its outcome is deliberately NOT asserted (the container cannot become healthy
+          # without a DC, the postinst rolls it back and ignores the result) -- only that
+          # the upgrade path got that far.
+          sudo journalctl -u linuxmuster-radius.service --no-pager \
+            | grep -q 'audit:update start name=ci'
 
           # ---------------------------------------------------------------- state AFTER
           for _ in $(seq 1 30); do sudo lmnradius health >/dev/null 2>&1 && break; sleep 1; done
@@ -300,9 +317,14 @@ jobs:
           sudo cp /var/lib/linuxmuster-radius/instances/ci.yaml after-raw.yaml
           diff -u before-raw.yaml after-raw.yaml || echo "(instance record rewritten by the software, see above)"
 
-          # The service survived enabled and running.
+          # The fixture image must not be this package's default -- see above: otherwise
+          # update-all skips the instance and the upgrade path is never exercised.
+          test "$fixture_image" != "$(sudo /opt/linuxmuster-radius/venv/bin/python -c 'from lmnradius.models import DEFAULT_IMAGE; print(DEFAULT_IMAGE)')"
+
+          # The service survived enabled and running, and the CLI is on PATH.
           test "$(systemctl is-enabled linuxmuster-radius.service)" = enabled
           test "$(systemctl is-active linuxmuster-radius.service)" = active
+          test "$(command -v lmnradius)" = /usr/bin/lmnradius
 
           # One version source: the venv metadata equals the dpkg version (~rc -> rc).
           ver="$(dpkg-query -W -f='${Version}' linuxmuster-radius)"
