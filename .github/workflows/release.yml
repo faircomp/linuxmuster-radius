@@ -111,13 +111,24 @@ jobs:
           mkdir -p previous
           tag="${{ github.event.inputs.prev_tag }}"
           if [ -z "$tag" ]; then
-            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 20 \
+            # Prefer the newest real release; fall back to the newest prerelease. Skipping is
+            # only legitimate when the repo has NO release at all: this job gates the release
+            # job, so a silent skip would publish a tag whose upgrade path was never tested.
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
                     --json tagName,isDraft,isPrerelease \
                     --jq '[.[] | select(.isDraft == false and .isPrerelease == false)][0].tagName // ""')
+            if [ -z "$tag" ]; then
+              tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+                      --json tagName,isDraft --jq '[.[] | select(.isDraft == false)][0].tagName // ""')
+              [ -n "$tag" ] && echo "::warning::no full release yet, upgrading from prerelease $tag"
+            fi
           fi
           if [ -z "$tag" ]; then
+            if [ "$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq 'length')" != "0" ]; then
+              echo "::error::releases exist but none could be selected - refusing to skip"; exit 1
+            fi
             echo "skip=1" >> "$GITHUB_OUTPUT"
-            echo "::notice::no published release yet, upgrade smoke skipped"
+            echo "::notice::first release of this package, nothing to upgrade from"
             exit 0
           fi
           for i in 1 2 3; do
@@ -216,7 +227,15 @@ jobs:
           # CA + server cert and the rendered instance.d configs.
           sudo bash -c 'find /etc/linuxmuster-radius/config.yml /etc/linuxmuster-radius/secrets \
                              /etc/linuxmuster-radius/certs /var/lib/linuxmuster-radius/instance.d \
-                             -type f | sort | xargs sha256sum' > before.sha256
+                             -type f | sort | xargs -r sha256sum' > before.sha256
+          # A manifest that ran empty would pass `sha256sum -c` while proving nothing:
+          # without -r, xargs runs sha256sum once with NO arguments, it hashes stdin and
+          # `-c` then reports "-: OK" with exit 0. So the manifest is pinned to exactly
+          # the 11 files the fixture above creates -- a renamed path or a fixture that
+          # silently did not run fails here instead of passing green.
+          test -s before.sha256
+          test "$(wc -l < before.sha256)" -eq 11
+          grep -q ' /etc/linuxmuster-radius/config.yml$' before.sha256
           sudo find /etc/linuxmuster-radius /var/lib/linuxmuster-radius/instance.d \
                -printf '%m %U:%G %p\n' | sort > before.perms
           sudo /opt/linuxmuster-radius/venv/bin/python record.py > before.record
@@ -229,6 +248,7 @@ jobs:
           # the release, and a plain install would report "already the newest version"
           # and test nothing. With it dpkg unpacks over the installed version and sets
           # $2 in the postinst, so the upgrade branches really run.
+          upgrade_since="$(date '+%Y-%m-%d %H:%M:%S')"
           sudo apt-get install -y --reinstall --allow-downgrades ./packages/*.deb 2>&1 | tee upgrade.log
 
           # The upgrade path really ran and did not silently no-op. Two independent
@@ -237,6 +257,8 @@ jobs:
           # thing that restarts it is `systemctl try-restart` inside the postinst's
           # `if [ -n "${2:-}" ]` branch, which exists only when dpkg passes an old version.
           grep -qE 'Unpacking linuxmuster-radius \([^)]+\) over \([^)]+\)' upgrade.log
+          # dpkg's own record of the action, independent of apt's wording.
+          grep -q ' upgrade linuxmuster-radius:' /var/log/dpkg.log
           after_pid="$(systemctl show -p MainPID --value linuxmuster-radius.service)"
           echo "postinst upgrade branch ran: MainPID $before_pid -> $after_pid"
           test "$before_pid" != "$after_pid"
@@ -244,7 +266,7 @@ jobs:
           # Its outcome is deliberately NOT asserted (the container cannot become healthy
           # without a DC, the postinst rolls it back and ignores the result) -- only that
           # the upgrade path got that far.
-          sudo journalctl -u linuxmuster-radius.service --no-pager \
+          sudo journalctl -u linuxmuster-radius.service --since "$upgrade_since" --no-pager \
             | grep -q 'audit:update start name=ci'
 
           # ---------------------------------------------------------------- state AFTER
