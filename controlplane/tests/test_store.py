@@ -113,3 +113,15 @@ def test_git_failure_raises_store_error(
     with pytest.raises(StoreError, match="git commit .* exited 128: fatal: simulated"):
         store.put(instance)
     assert (repo / f"{instance.name}.yaml").is_file()
+
+
+def test_delete_drops_the_updater_rollback_pointer(
+    isolated_git: None, tmp_path: Path, instance: Instance
+) -> None:
+    repo = _repo(tmp_path)
+    store = Store(str(repo))
+    store.put(instance)
+    (repo / f"{instance.name}.prev").write_text("ghcr.io/x@sha256:" + "a" * 64)
+    store.delete(instance.name)
+    assert not (repo / f"{instance.name}.prev").exists()
+    assert _git(repo, "status", "--porcelain") == ""

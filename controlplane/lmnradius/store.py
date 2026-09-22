@@ -95,6 +95,9 @@ class Store:
         :raises StoreError: the directory is a git repository but the commit failed.
         """
         file = self._file(name)
+        # The updater's rollback pointer (<name>.prev) belongs to the removed instance;
+        # untracked by git, so a plain unlink (found left behind in the lab, 2026-09-22).
+        file.with_suffix(".prev").unlink(missing_ok=True)
         if not file.exists():
             return
         file.unlink()
