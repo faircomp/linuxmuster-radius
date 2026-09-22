@@ -209,6 +209,7 @@ jobs:
           sudo find /etc/linuxmuster-radius /var/lib/linuxmuster-radius/instance.d \
                -printf '%m %U:%G %p\n' | sort > before.perms
           sudo /opt/linuxmuster-radius/venv/bin/python record.py > before.record
+          sudo cp /var/lib/linuxmuster-radius/instances/ci.yaml before-raw.yaml
           cat before.sha256 before.perms before.record
           before_pid="$(systemctl show -p MainPID --value linuxmuster-radius.service)"
 
@@ -243,6 +244,13 @@ jobs:
           # The instance record, field by field.
           sudo /opt/linuxmuster-radius/venv/bin/python record.py > after.record
           diff -u before.record after.record
+          # Not an assertion, a record: what the software itself rewrote in the instance
+          # file. 7.3.1 added `ldap_ca` and update-all rewrites `image` (and rolls it
+          # back), so across a version jump this diff is legitimately non-empty. It is
+          # printed so that a newly added field is NOTICED and gets into the key list
+          # above in the same PR instead of silently escaping the comparison.
+          sudo cp /var/lib/linuxmuster-radius/instances/ci.yaml after-raw.yaml
+          diff -u before-raw.yaml after-raw.yaml || echo "(instance record rewritten by the software, see above)"
 
           # The service survived enabled and running.
           test "$(systemctl is-enabled linuxmuster-radius.service)" = enabled
