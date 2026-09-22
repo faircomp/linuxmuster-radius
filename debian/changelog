@@ -1,3 +1,60 @@
+linuxmuster-radius (7.3.1) lmn73; urgency=medium
+
+  * SECURITY: the LDAPS link to the DC is now verified. Up to 7.3.0 the stunnel
+    that carries rlm_ldap's group lookup accepted any DC certificate, so an
+    on-path attacker between the RADIUS VM and the DC could answer the per-SSID
+    role gate and the VLAN decision (MSCHAPv2 itself runs over the signed winbind
+    channel and was not affected). New instances on ldaps:// must pin the DC's
+    CA: `lmnradius create --ldap-ca /etc/linuxmuster/ssl/cacert.pem` (the
+    linuxmuster CA, now also written by provision-radius-account.sh as
+    ldap-ca.pem) or, as the documented fallback, `--ldap-ca-tofu` (pins what the
+    DC serves now, prints the SHA-256 fingerprints, warns loudly). The API
+    refuses ldaps:// without a CA. A wrong CA fails closed: the container does
+    not start (verified on the lab DC).
+  * REQUIRED UPGRADE STEP: instances created with 7.3.0 or earlier keep running
+    but unverified; `lmnradius list` and `lmnradius health` warn with
+    "LDAPS unverified" until you run
+    `lmnradius set-ldap-ca <instance> --ldap-ca <cacert.pem>` (or --ldap-ca-tofu).
+    The command pins the CA and restarts the container with verification.
+  * The domain join no longer registers the container's Docker bridge address
+    (172.17.0.x) as the A record of the RADIUS FQDN: the join runs with
+    --no-dns-updates and the container registers the host's LAN address (HOST_IP,
+    auto-detected, `host_ip:` in config.yml overrides) on every start, so an
+    upgraded host corrects its record by itself. Needs the new image, which
+    update-all applies during the upgrade.
+  * `lmnradius rm` now leaves the domain: it removes the DNS A record and deletes
+    the computer account (image action `leave`, join credentials), then removes
+    the container, the machine-account volume, the rendered config and the
+    record. A failed leave (DC unreachable) is reported with the manual cleanup
+    steps and exit 1; certs/<instance>/ is kept on purpose.
+  * `--client-subnet` inside 127.0.0.0/8 (or any CIDR covering 127.0.0.1) is
+    rejected: loopback is the image's healthcheck client and such a client made
+    the instance crash-loop while create/reconcile still reported "running".
+  * create/reconcile/status report the container honestly: `running` is false
+    while Docker restarts it, `crash_looping` + `restart_count` + `last_error`
+    (the entrypoint's FATAL line) flag a restart loop; create and reconcile wait
+    up to 45 s for healthy/crash and exit 1 when the instance is not running.
+    The updater treats a crash loop as a failed update and rolls back at once.
+  * The instance change log works: the postinst initialises and configures the
+    git repository as the service user (it did so as root after the chown, git
+    refused, the identity was never set and every commit failed silently), sets
+    user.name/user.email in the repo, and on upgrade commits records that were
+    only ever staged. The service commits with an explicit identity; a git
+    failure is now an error (HTTP 500 with git's message) instead of silence.
+  * The .deb ships DEBIAN/md5sums (dpkg --verify works, lintian
+    no-md5sums-control-file is gone).
+  * Renovate also bumps the pinned types-PyYAML (four-part version) in ci.yml;
+    install.md aborts with a message when the GitHub API returns no version.
+  * docs: stray </content></invoke> lines removed from radius-and-ad.md;
+    LDAPS verification, DNS registration and the rm teardown documented
+    (radius-and-ad.md, threat-model.md, operations.md, install.md); eapol_test
+    recipe (package eapoltest, -N30, no -d on Ubuntu) added to install.md;
+    discover-ad-facts.sh now emits the recommended role-teacher/role-student
+    skeleton with all-wifi for multi-school setups; --passphrase mentioned in
+    certs-and-ca.md.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Tue, 22 Sep 2026 15:00:00 +0200
+
 linuxmuster-radius (7.3.0) lmn73; urgency=medium
 
   * Switch to the linuxmuster.net version scheme (7.<line>.<n>, distribution lmn73).
