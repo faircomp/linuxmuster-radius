@@ -18,10 +18,10 @@
     },
     {
       "customType": "regex",
-      "description": "Bump the PINNED CI gate tools (ruff/mypy/reuse/pytest) that ci.yml installs inside a `pip install` run-step. They are pinned so a linter widening its default rules cannot turn the pipeline red on its own; Renovate keeps them current as reviewable PRs.",
+      "description": "Bump the PINNED CI gate tools (ruff/mypy/reuse/pytest/types-PyYAML) that ci.yml installs inside a `pip install` run-step. They are pinned so a linter widening its default rules cannot turn the pipeline red on its own; Renovate keeps them current as reviewable PRs. The version part accepts any number of dot-separated components (types-PyYAML uses four, e.g. 6.0.12.20260906).",
       "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
       "matchStrings": [
-        "(?<depName>ruff|mypy|reuse|pytest)==(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+        "(?<depName>ruff|mypy|reuse|pytest|types-PyYAML)==(?<currentValue>[0-9]+(?:\\.[0-9]+)+)"
       ],
       "datasourceTemplate": "pypi"
     }
