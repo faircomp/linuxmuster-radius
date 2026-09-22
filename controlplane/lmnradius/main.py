@@ -44,6 +44,7 @@ def main() -> None:
         container_bind_ip=settings.container_bind_ip,
         log_max_size=settings.log_max_size,
         log_max_file=settings.log_max_file,
+        host_ip=settings.host_ip,
     )
     reconciler = Reconciler(store, docker)
     updater = Updater(store, docker, reconciler)

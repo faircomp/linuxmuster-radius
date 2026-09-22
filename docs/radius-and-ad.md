@@ -125,9 +125,34 @@ die Authentifizierung selbst — die läuft über winbind (§ 1).
   ihn in das `ldap`-Modul (`0640`, `freerad`) — nie in Env oder Log.
 - **Transport:** Der Operator setzt `ldaps://<dc>`; intern spricht `rlm_ldap` jedoch
   Klartext-LDAP zu einem **lokalen stunnel**, das die TLS-Verbindung zum DC terminiert
-  (der `libldap`-GnuTLS-vs-OpenSSL-Crash im threaded Server, ADR-015). Der Gruppencheck
-  ist rekursiv. Die per-SSID-Verzweigung (`Called-Station-SSID` → geforderte Gruppe)
-  beschreibt ADR-007 (Ableitung im inner-tunnel).
+  (der `libldap`-GnuTLS-vs-OpenSSL-Crash im threaded Server, ADR-015). Die per-SSID-
+  Verzweigung (`Called-Station-SSID` → geforderte Gruppe) beschreibt ADR-007 (Ableitung
+  im inner-tunnel).
+- **DC-Zertifikat wird geprüft (seit 7.3.1 Pflicht für neue Instanzen).** Über genau
+  diese Verbindung laufen das Rollen-Gate und die VLAN-Entscheidung; ohne Prüfung könnte
+  ein On-Path-Angreifer zwischen RADIUS-VM und DC die Gruppenabfrage beantworten
+  ([`threat-model.md`](threat-model.md)). stunnel verifiziert deshalb das DC-Zertifikat
+  gegen das mit `--ldap-ca <datei>` gepinnte PEM-Bündel (Instanz-Feld `ldap_ca`,
+  Datei `certs/<instanz>/ldap-ca.pem`, `0600`, read-only in den Container gemountet als
+  `LDAP_CA`). Auf einem linuxmuster.net-Server ist das die linuxmuster-CA
+  `/etc/linuxmuster/ssl/cacert.pem` — sie signiert das DC-Zertifikat aus `tls certfile`
+  in der DC-`smb.conf`; `provision-radius-account.sh` legt sie als `ldap-ca.pem` neben
+  die Secrets. Zwei Pin-Modi, vom Entrypoint am **Inhalt** der Datei erkannt:
+  - **chain** — die Datei enthält einen Trust-Anker (selbstsigniertes CA-Zertifikat):
+    Kettenprüfung bis zur CA plus Hostnamen-Check (`checkHost`, CN-Fallback: das
+    linuxmuster-DC-Zertifikat trägt keinen SAN). Überlebt eine Erneuerung des
+    DC-Zertifikats.
+  - **peer** — nur Endzertifikat(e), typisch nach `--ldap-ca-tofu` (der DC liefert die
+    CA nicht in der Kette): das DC-Zertifikat selbst ist gepinnt (`verifyPeer`); ein
+    erneuertes DC-Zertifikat schlägt **fail-closed** fehl, bis `lmnradius set-ldap-ca`
+    neu pinnt.
+  Fehlt die Prüfung (Instanzen aus ≤ 7.3.0 ohne `ldap_ca`), läuft LDAPS **unverifiziert**
+  weiter; `lmnradius list`/`health` warnen mit „LDAPS unverified", der Container loggt
+  `WARN: LDAPS ... is UNVERIFIED`. Upgrade-Schritt: `lmnradius set-ldap-ca <instanz>
+  --ldap-ca /pfad/cacert.pem` ([`install.md`](install.md) § 9). Schlägt die Prüfung fehl
+  (falsche CA, manipulierter DC), scheitert bereits der `rlm_ldap`-Verbindungsaufbau beim
+  Start: der Container geht **nicht** in Betrieb (fail-closed, in der Fix-Runde
+  2026-09-22 negativ getestet) statt stumm ohne Prüfung zu authentisieren.
 
 ## 4. DC-seitige Voraussetzung — `ntlm auth`
 
@@ -161,7 +186,23 @@ Punkte sind Vorbedingungen, keine Optionen:
 - **Vorwärts-DNS muss auflösen.** Für `SERVER_FQDN` (das ist zugleich der `SAN`/CN des
   EAP-Server-Zertifikats und der von Clients gepinnte Servername, siehe
   [`certs-and-ca.md`](certs-and-ca.md)) ein **A-Record**; der DC muss per SRV/Name
-  erreichbar sein.
+  erreichbar sein. **Woher der A-Record kommt:** der Join läuft mit `--no-dns-updates`
+  (bis 7.3.0 registrierte `net ads join` die **Docker-Bridge-Adresse** `172.17.0.x` des
+  Containers als A-Record — unerreichbar für alles, was den RADIUS-Namen über das AD-DNS
+  auflöst). Stattdessen registriert der Container **bei jedem Start** die **LAN-Adresse
+  der RADIUS-VM**, die die Control Plane als `HOST_IP` übergibt (automatisch: die
+  Adresse, über die der DC erreicht wird, sonst das Default-Route-Interface; fest per
+  `host_ip:` in `config.yml`). Zuerst mit dem Maschinenkonto (`net ads dns register
+  -P`); scheitert das, mit dem **Join-Konto** (`-A`, dieselbe Authfile wie der Join).
+  Der Fallback ist nötig, weil ein bereits vorhandener DNS-Knoten einem anderen Konto
+  gehören kann — nach einem `lmnradius rm` bleibt der Knoten als Tombstone des
+  gelöschten Maschinenkontos zurück, und eine neu angelegte Instanz gleichen Namens
+  bekommt mit `-P` nur `ERROR_DNS_UPDATE_FAILED` (am echten DC verifiziert, 2026-09-22).
+  Ein Host, der beim Upgrade von 7.3.0 noch den Bridge-Record trägt, korrigiert ihn
+  damit selbst. Auf dem devices.csv-Weg legt `linuxmuster-import-devices` den Record an;
+  das Join-Konto darf ihn überschreiben (Wert ist dieselbe Host-Adresse). Gelingt beides
+  nicht, bleibt es bei einer `WARN`-Zeile im Container-Log (Record dann von Hand prüfen:
+  `host <fqdn>` auf dem DC).
 - **NTP-Skew < 5 min.** Die Uhr der RADIUS-VM muss mit dem DC synchron sein (Kerberos-
   Toleranz), sonst `KRB_AP_ERR_SKEW` beim Join.
 - **Kein Reverse-DNS-Zwang.** Das Image backt `/etc/krb5.conf` mit **`rdns` /
@@ -186,7 +227,19 @@ Ergänzend hält der Container das **Maschinenkonto-Secret** selbst auf dem pers
 `/var/lib/samba`-Volume (aus dem Join, § 1) — das ist kein vom Betreiber gepflegtes
 Secret, sondern generierter Zustand. Die EAP-Zertifikate/-Schlüssel (`EAP_CA`,
 `EAP_CERT`, `EAP_KEY`) sind separat und in [`certs-and-ca.md`](certs-and-ca.md)
-beschrieben.
+beschrieben; die gepinnte **DC-CA** für LDAPS (`ldap_ca` → `LDAP_CA`, § 3) liegt bei
+ihnen unter `certs/<instanz>/ldap-ca.pem` — kein Secret, aber `0600`.
+
+**Domäne verlassen — `lmnradius rm`.** Der Rückbau ist seit 7.3.1 vollständig: `rm`
+stoppt den Container, startet dasselbe Image einmalig mit dem Kommando `leave` (gleiche
+Env, Secrets und Volume), das den A-Record von `SERVER_FQDN` entfernt (`net ads dns
+unregister`, Maschinenkonto, Fallback Join-Konto) und mit dem Join-Konto `net ads leave`
+ausführt (Computerkonto gelöscht), und entfernt danach Container, Samba-Volume, gerenderte
+Config und den Instanz-Datensatz. Bleibt `certs/<instanz>/` (EAP-Server-Zert/-Key +
+`ldap-ca.pem`) — bewusst, von Hand löschen. Scheitert das Verlassen (DC nicht erreichbar),
+wird lokal trotzdem aufgeräumt und die CLI meldet rot, was auf dem DC zu tun ist
+(`samba-tool computer delete <NAME>$`, A-Record). Auf dem devices.csv-Weg zusätzlich die
+Zeile aus `devices.csv` entfernen, sonst legt der nächste Import das Konto neu an.
 
 Alle Mount-Quellen werden **fail-closed** geprüft: fehlt eine Secret- oder
 Zertifikatsdatei, startet die Instanz **nicht** (die Prüfung läuft, bevor der laufende
@@ -200,5 +253,4 @@ ADR-007 per-SSID-Gate); verifizierte Fakten mit Quellen → [`references.md`](re
 Gesamtbild (Control/Data Plane, Auth-Pfad) → [`architecture.md`](architecture.md)
 (§ 6 + § 8); EAP-CA & Client-Pinning → [`certs-and-ca.md`](certs-and-ca.md);
 Client-Rollout per GPO/MDM → [`deployment-gpo.md`](deployment-gpo.md).
-</content>
-</invoke>
+

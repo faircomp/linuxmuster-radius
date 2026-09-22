@@ -26,7 +26,10 @@ Die `postinst` legt den Systembenutzer `lmnradius` an (in der Gruppe `docker`), 
 ein **zufälliges API-Token** in `/etc/linuxmuster-radius/config.yml` (`0600`) und startet
 den Dienst — gebunden an **`127.0.0.1:8080`**. Verzeichnisse: `secrets_dir`
 (`/etc/linuxmuster-radius/secrets`, `0700`), `certs_dir` (`/etc/linuxmuster-radius/certs`,
-`0700`), `instances_dir` (`/var/lib/linuxmuster-radius/instances`, als Git-Repo = Change-Log).
+`0700`), `instances_dir` (`/var/lib/linuxmuster-radius/instances`, als Git-Repo = Change-Log:
+jedes `create`/`set-ldap-ca`/`rm` ist ein Commit, `sudo -u lmnradius git -C
+/var/lib/linuxmuster-radius/instances log` zeigt die Historie; die `postinst` legt Repo
+und Identität als `lmnradius` an und holt beim Upgrade liegengebliebene Datensätze nach).
 
 ## Erstinbetriebnahme (einmalig)
 
@@ -49,6 +52,8 @@ Reihenfolge — jeder Schritt setzt den vorigen voraus:
    scripts/provision-radius-account.sh <hostname> <mac> <ip> [out-secrets-dir]
    linuxmuster-import-devices          # legt das Maschinenkonto an (falls nicht via RUN_IMPORT=1)
    ```
+   Das Skript legt außerdem `ldap-ca.pem` (die linuxmuster-CA, kein Secret) in den
+   Ausgabeordner — sie wird in Schritt 5 mit `--ldap-ca` gepinnt.
 
    > **Join-Konto (verifiziert am echten DC, 2026-07-12):** Ein einfacher Benutzer kann
    > **nicht** joinen (`Insufficient access`) — in das `join.authfile` gehört der
@@ -79,6 +84,7 @@ Reihenfolge — jeder Schritt setzt den vorigen voraus:
      --ldap-server ldaps://dc.linuxmuster.lan \
      --ldap-base-dn DC=linuxmuster,DC=lan \
      --ldap-bind-dn CN=global-binduser,OU=Management,OU=GLOBAL,DC=linuxmuster,DC=lan \
+     --ldap-ca /etc/linuxmuster-radius/secrets/ldap-ca.pem \
      --wifi-group wifi \
      --client-subnet 10.0.0.0/16 \
      --ssid lehrer:teachers:20 --ssid schueler:students:10 \
@@ -88,10 +94,17 @@ Reihenfolge — jeder Schritt setzt den vorigen voraus:
    ```
 
    - `--server-fqdn` = **Container-Hostname == EAP-Cert-CN/SAN**, vorwärts auflösbar über
-     den DC (siehe [`radius-and-ad.md`](radius-and-ad.md) § 5).
+     den DC (siehe [`radius-and-ad.md`](radius-and-ad.md) § 5). Den A-Record dafür
+     registriert der Container bei jedem Start selbst mit der LAN-IP der VM (`host_ip`
+     in `config.yml` setzt sie fest, sonst automatisch).
+   - `--ldap-ca` ist bei `ldaps://` **Pflicht**: das PEM der CA, die das DC-Zertifikat
+     signiert (linuxmuster: `/etc/linuxmuster/ssl/cacert.pem`). Alternative
+     `--ldap-ca-tofu` (Trust on first use, Fingerprint gegenprüfen). Ohne CA lehnt die
+     API ab; Details [`radius-and-ad.md`](radius-and-ad.md) § 3.
    - `--client-subnet` ist **wiederholbar** — die **AP-Management-Subnetze** als CIDR (die
      Access Points sind der NAS und senden ab **eigener** IP; nur die Controller-IP ergibt
-     `unknown client`).
+     `unknown client`). **Nichts aus `127.0.0.0/8`** — loopback gehört dem Healthcheck-
+     Client des Images; die API lehnt es ab (bis 7.3.0 ließ es die Instanz crash-loopen).
    - `--ssid` ist **wiederholbar** — `name:group[:vlan]`.
    - `--image` ist optional (Default: der gepflegte, digest-gepinnte Data-Plane-Image).
 
@@ -115,14 +128,29 @@ Reihenfolge — jeder Schritt setzt den vorigen voraus:
 ## Instanzen verwalten (Lifecycle)
 
 ```
-lmnradius list                                  # alle Instanzen
+lmnradius list                                  # alle Instanzen (+ Warnung "LDAPS unverified")
 lmnradius show    default-school                # eine Instanz (Spec)
-lmnradius status  default-school                # exists/running/health/image
+lmnradius status  default-school                # exists/running/health/restart_count/crash_looping/image
 lmnradius start|stop|restart default-school
 lmnradius logs    default-school --tail 100 --grep teacher1   # radiusd-Log, optional gefiltert
 lmnradius logs    default-school --since 1783000000           # ab Unix-Epoch-Sekunde
-lmnradius rm      default-school                # Instanz + Container entfernen
+lmnradius set-ldap-ca default-school --ldap-ca /root/cacert.pem   # DC-CA (neu) pinnen, Container neu starten
+lmnradius rm      default-school                # Domäne verlassen + Container/Volume/Config/Datensatz entfernen
 ```
+
+- **`status`/`create`/`reconcile` sagen die Wahrheit:** `running` ist nur wahr, wenn der
+  Container läuft und nicht gerade neu gestartet wird; `crash_looping` (mit
+  `restart_count` und der letzten `FATAL`-Zeile als `last_error`) markiert einen Container,
+  den die Restart-Policy schon einmal neu starten musste und der nicht `healthy` ist.
+  `create`/`reconcile` warten bis zu 45 s auf healthy/unhealthy/Crash und enden mit Exit 1,
+  wenn die Instanz nicht läuft (der Datensatz ist trotzdem gespeichert).
+- **`rm` verlässt die Domäne:** stoppt den Container, entfernt mit dem Maschinenkonto den
+  A-Record des FQDN und mit dem Join-Konto das Computerkonto (`net ads leave`), löscht
+  Container, Samba-Volume, gerenderte Config und den Datensatz. `certs/<name>/` bleibt
+  (EAP-Server-Zert/-Key, `ldap-ca.pem`) — bei Bedarf von Hand löschen. Ist der DC nicht
+  erreichbar, räumt `rm` lokal auf, meldet rot, was auf dem DC bleibt (`samba-tool
+  computer delete <NAME>$`, A-Record), und endet mit Exit 1. devices.csv-Weg: die Zeile
+  ebenfalls entfernen, sonst legt der nächste Import das Konto neu an.
 
 ## Updates (digest-gepinnt, Health-Auto-Rollback)
 
@@ -180,7 +208,8 @@ Beispielausgabe mit `--user`:
   `ntlm_auth`-Lauf im Container gereicht und **nie** geloggt oder gespeichert.
 - **Exit-Code:** `0` nur, wenn der Login-Teil (falls `--user`) erfolgreich war — taugt so als
   Zusicherung in Skripten. Die **volle** PEAP-/VLAN-Kette inkl. AP-Secret prüft weiterhin
-  `eapol_test` aus dem AP-Subnetz (siehe unten) bzw. ein echter Client mit `lmnradius logs`.
+  `eapol_test` aus dem AP-Subnetz (Rezept in [`install.md`](install.md) Schritt 8) bzw. ein
+  echter Client mit `lmnradius logs`.
 
 - **Audit-Log:** jede API-Mutation (create/update/rollback/cert issue/…) geht an den Logger
   **`lmnradius.audit`** → syslog/journal.
@@ -188,6 +217,23 @@ Beispielausgabe mit `--user`:
   klarer Meldung — Instanzen bleiben unberührt.
 - **Health:** `healthcheck.sh` im Container prüft `wbinfo -t` (AD-Trust) **und** einen
   radiusd-Status-Server-Probe (dienst hört) — beides zusammen = „up **und** enforcing".
+- **LDAPS-Prüfung:** `lmnradius list`/`health` warnen mit „LDAPS unverified", solange eine
+  `ldaps://`-Instanz keine CA gepinnt hat (Datensätze aus ≤ 7.3.0). Im Container-Log steht
+  beim Start, ob stunnel das DC-Zertifikat prüft (`verified against the CA` / `pinned` /
+  `WARN: ... UNVERIFIED`). Schlägt die Prüfung fehl (falsche CA, erneuertes DC-Zertifikat im
+  TOFU-Modus), kommt der Container **nicht** hoch (`crash_looping`, stunnel-Fehler im Log).
+
+### Upgrade von ≤ 7.3.0 — DC-CA pinnen (Pflicht)
+
+```
+lmnradius list                                   # WARNING: instance 'x': LDAPS unverified ...
+scp root@<dc>:/etc/linuxmuster/ssl/cacert.pem /root/ldap-ca.pem
+lmnradius set-ldap-ca x --ldap-ca /root/ldap-ca.pem     # oder: --ldap-ca-tofu (Fingerprint prüfen!)
+lmnradius list                                   # keine Warnung mehr
+```
+`set-ldap-ca` schreibt `certs/<name>/ldap-ca.pem` (0600), setzt `ldap_ca` im Datensatz
+(Commit) und startet den Container mit Prüfung neu. Das Paket-Upgrade selbst hebt die
+Instanz per `update-all` auf das neue Image (A-Record → LAN-IP, `rm`-Rückbau).
 
 ### Alerting ohne Monitoring-Stack
 
@@ -227,7 +273,10 @@ abgelehnt) hat = **personenbezogene Daten**. Daher:
   Secret-Problem verursacht Downtime).
 - **Maschinenkonto-Secret:** liegt aus dem Join im persistenten Volume
   `lmnradius-samba-<name>` (`/var/lib/samba`) — generierter Zustand, kein gepflegtes
-  Secret. Geht das Volume verloren, muss die Instanz **neu joinen** (Re-Join).
+  Secret. Geht das Volume verloren, muss die Instanz **neu joinen** (Re-Join); `lmnradius
+  rm` löscht es zusammen mit dem Computerkonto.
+- **DC-CA (`certs/<name>/ldap-ca.pem`, `0600`):** kein Secret, aber die Vertrauensbasis
+  der LDAPS-Prüfung — mitsichern; `set-ldap-ca` stellt sie jederzeit neu her.
 
 ## Backup
 
@@ -238,7 +287,7 @@ Zu sichern:
 - `/etc/linuxmuster-radius/certs/` (**EAP-CA-Key + Server-Keys** — ohne die CA gibt es kein
   neues Server-Zertifikat),
 - `instances_dir` (`/var/lib/linuxmuster-radius/instances/*.yaml` — git-versioniert =
-  Change-Log; die `postinst` legt das Repo an),
+  Change-Log, jede Änderung ein Commit; die `postinst` legt das Repo als `lmnradius` an),
 - optional die **`/var/lib/samba`-Volumes** (`lmnradius-samba-<name>`): sichern spart den
   Re-Join, ist aber verzichtbar — geht das Volume verloren, joint die Instanz neu.
 
@@ -290,5 +339,8 @@ lmnradius reconcile      # liest den Soll-Zustand, zieht die gepinnten Digests -
   PEAP-MSCHAPv2 **und** Mitgliedschaft in `wifi` + der geforderten Rollengruppe gibt es
   **Access-Reject**; ohne gepinntes Server-Zertifikat am Client ist PEAP **wertlos** (das
   Pinning ist tragend, siehe [`certs-and-ca.md`](certs-and-ca.md)).
+- Die LDAPS-Verbindung zum DC (Rollen-Gate, VLAN) ist gegen die gepinnte DC-CA verifiziert
+  (`ldap_ca`); eine unverifizierte Alt-Instanz wird von `list`/`health` gemeldet
+  ([`threat-model.md`](threat-model.md)).
 - Data-Plane-Container: read-only rootfs, `cap_drop`, `no-new-privileges`, Secrets/Certs als
   read-only Mounts; der zweite Daemon (`winbindd`) läuft klein-supervidiert neben `radiusd`.

@@ -184,13 +184,44 @@ if [ -n "$AGG" ]; then
 fi
 echo
 
-echo "== Vorlage: 'lmnradius create' pro Schule =="
+echo "== Vorlage: 'lmnradius create' =="
 echo "   (FILL: --server-fqdn, --client-subnet und die Secret-Datei-Namen ergänzen;"
-echo "    Secrets baut provision-radius-account.sh — siehe REMINDERS unten.)"
+echo "    Secrets + ldap-ca.pem baut provision-radius-account.sh — siehe REMINDERS unten.)"
 echo
+# Regelfall (docs/install.md Schritt 5): EINE Instanz für alle Schulen mit den
+# schulübergreifenden, direkt zugewiesenen Rollengruppen role-teacher/role-student;
+# bei mehr als einer Schule ist das Grund-Gate 'all-wifi' (transitiv über das
+# winbind-Token, verifiziert am echten DC). Die per-Schule-Skeletons folgen darunter.
+n_schools="$(schools_of | grep -c . || true)"
+wifi_gate="$WIFI_GROUP"
+[ "${n_schools:-0}" -gt 1 ] && group_present "all-wifi" && wifi_gate="all-wifi"
+if group_present "role-teacher" || group_present "role-student"; then
+    echo "# --- Regelfall: alle Schulen, Rollengruppen role-teacher/role-student ---"
+    echo "lmnradius create \\"
+    echo "  --name default-school \\"
+    echo "  --realm ${REALM} \\"
+    echo "  --workgroup ${WORKGROUP} \\"
+    echo "  --server-fqdn <FILL: FQDN == Container-Hostname == EAP-Cert-CN/SAN> \\"
+    echo "  --ldap-server ${LDAP_SERVER} \\"
+    echo "  --ldap-base-dn ${BASE_DN} \\"
+    echo "  --ldap-bind-dn ${BIND_DN} \\"
+    echo "  --ldap-ca /etc/linuxmuster-radius/secrets/ldap-ca.pem \\"
+    echo "  --wifi-group ${wifi_gate} \\"
+    echo "  --client-subnet <FILL: AP-Management-Subnetz als CIDR, z. B. 10.0.0.0/24 — nie 127.0.0.0/8> \\"
+    group_present "role-teacher" && echo "  --ssid lehrer-wlan:role-teacher:20 \\"
+    group_present "role-student" && echo "  --ssid schueler-wlan:role-student:10 \\"
+    echo "  --join-secret <FILL: join.authfile> \\"
+    echo "  --ldap-bind-secret <FILL: ldap-bind.secret> \\"
+    echo "  --radius-secret <FILL: radius.secret>"
+    if [ "${n_schools:-0}" -gt 1 ] && [ "$wifi_gate" != "all-wifi" ]; then
+        echo "  # ${n_schools} Schulen, aber keine Gruppe all-wifi gefunden: --wifi-group prüfen"
+    fi
+    echo
+fi
 if [ -z "$ROLE_GROUPS" ]; then
     echo "   (keine Rollengruppen — kein Skeleton erzeugt)"
 else
+    echo "# --- Alternative: eine Instanz je Schule (nur EINE Schule ins WLAN) ---"
     schools_of | while IFS= read -r school; do
         [ -n "$school" ] || continue
         if [ "$school" = "default-school" ]; then
@@ -209,8 +240,9 @@ else
         echo "  --ldap-server ${LDAP_SERVER} \\"
         echo "  --ldap-base-dn ${BASE_DN} \\"
         echo "  --ldap-bind-dn ${BIND_DN} \\"
+        echo "  --ldap-ca /etc/linuxmuster-radius/secrets/ldap-ca.pem \\"
         echo "  --wifi-group ${WIFI_GROUP} \\"
-        echo "  --client-subnet <FILL: AP-Management-Subnetz als CIDR, z. B. 10.0.0.0/24> \\"
+        echo "  --client-subnet <FILL: AP-Management-Subnetz als CIDR, z. B. 10.0.0.0/24 — nie 127.0.0.0/8> \\"
         if group_present "$tgroup"; then
             echo "  --ssid ${tssid}:${tgroup}:20 \\"
         fi

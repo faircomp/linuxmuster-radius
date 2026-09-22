@@ -27,5 +27,9 @@ ssids:
 join_secret: default-school.join
 ldap_bind_secret: default-school.ldap-bind
 radius_secret: default-school.radius
+# Pinned DC CA for the LDAPS link (certs/<name>/ldap-ca.pem, written by `lmnradius
+# create --ldap-ca` / `set-ldap-ca`). Mandatory for ldaps:// since 7.3.1; null only
+# on records created earlier (then listed as "LDAPS unverified").
+ldap_ca: ldap-ca.pem
 # Digest-pinned in production (Renovate, P5). The 64-hex digest below is illustrative.
-image: ghcr.io/faircomp/linuxmuster-radius@sha256:2dd07e23e01b7f97614164266c68c60f96c2fcc0feac4cb1c2adf0a2ba7ad894
+image: ghcr.io/faircomp/linuxmuster-radius@sha256:7385d3a64c3d98afa33577473c6b065f2a6a2ef88fa7ff70117ab6262118a77a

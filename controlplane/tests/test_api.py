@@ -102,9 +102,11 @@ def test_happy_path_lifecycle(
     assert resp.status_code == 200
     assert "logs" in resp.json()
 
-    # delete -> 204
+    # delete -> 200 with the domain-leave result (never a silent 204)
     resp = client.delete(f"/v1/instances/{NAME}", headers=auth_headers)
-    assert resp.status_code == 204
+    assert resp.status_code == 200
+    assert resp.json()["removed"] is True
+    assert resp.json()["domain_leave"]["ok"] is True
 
     # gone
     resp = client.get(f"/v1/instances/{NAME}", headers=auth_headers)
@@ -361,3 +363,141 @@ def test_test_endpoint_rejects_bad_username(
         headers=auth_headers,
     )
     assert resp.status_code == 422
+
+
+# ------------------------------------------------------- LDAPS CA pinning (7.3.1)
+
+
+def test_create_ldaps_without_ca_is_422(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any]
+) -> None:
+    # NEGATIVE + security: an ldaps:// instance without a CA to verify the DC against
+    # is refused (strict by default); the detail tells the operator both options.
+    body = {k: v for k, v in instance_data.items() if k != "ldap_ca_pem"}
+    resp = client.post("/v1/instances", json=body, headers=auth_headers)
+    assert resp.status_code == 422
+    assert "--ldap-ca" in resp.json()["detail"]
+    assert "--ldap-ca-tofu" in resp.json()["detail"]
+    assert client.get(f"/v1/instances/{NAME}", headers=auth_headers).status_code == 404
+
+
+def test_create_plain_ldap_needs_no_ca(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any]
+) -> None:
+    body = {k: v for k, v in instance_data.items() if k != "ldap_ca_pem"}
+    body["ldap_server"] = "ldap://dc.linuxmuster.lan"
+    resp = client.post("/v1/instances", json=body, headers=auth_headers)
+    assert resp.status_code == 201
+    assert resp.json()["instance"]["ldap_ca"] is None
+
+
+def test_create_with_ca_pins_it(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    instance_data: dict[str, Any],
+    settings: Any,
+    docker: Any,
+    dc_ca_pem: str,
+) -> None:
+    import os
+
+    resp = client.post("/v1/instances", json=instance_data, headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["instance"]["ldap_ca"] == "ldap-ca.pem"
+    assert body["ldap_ca"]["trust_anchor"] is True
+    assert body["ldap_ca"]["certificates"][0]["subject"] == "CN=test DC CA"
+    assert len(body["ldap_ca"]["certificates"][0]["sha256_fingerprint"]) == 64
+    # stored under certs_dir/<name>/ with 0600 in a 0700 directory
+    path = os.path.join(settings.certs_dir, NAME, "ldap-ca.pem")
+    assert open(path, encoding="utf-8").read() == dc_ca_pem
+    assert oct(os.stat(path).st_mode & 0o777) == "0o600"
+    assert oct(os.stat(os.path.dirname(path)).st_mode & 0o777) == "0o700"
+    # the persisted record references the file and the container got LDAP_CA
+    assert (
+        client.get(f"/v1/instances/{NAME}", headers=auth_headers).json()["ldap_ca"] == "ldap-ca.pem"
+    )
+    assert "ldap_ca_pem" not in client.get(f"/v1/instances/{NAME}", headers=auth_headers).json()
+
+
+def test_create_with_garbage_pem_is_422(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any]
+) -> None:
+    resp = client.post(
+        "/v1/instances", json={**instance_data, "ldap_ca_pem": "not a pem"}, headers=auth_headers
+    )
+    assert resp.status_code == 422
+    assert "ldap_ca_pem" in resp.json()["detail"]
+
+
+def test_set_ldap_ca_on_legacy_instance(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    instance_data: dict[str, Any],
+    store: Any,
+    docker: Any,
+    dc_ca_pem: str,
+) -> None:
+    from lmnradius.models import Instance
+
+    # A record written by 7.3.0 (no ldap_ca) is listed as unverified ...
+    store.put(Instance(**instance_data))
+    listed = client.get("/v1/instances", headers=auth_headers).json()
+    assert listed[0]["ldap_ca"] is None
+    # ... and the upgrade step pins the CA and re-applies the instance.
+    resp = client.put(
+        f"/v1/instances/{NAME}/ldap-ca", json={"pem": dc_ca_pem}, headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["instance"]["ldap_ca"] == "ldap-ca.pem"
+    assert resp.json()["status"]["running"] is True
+    assert docker.ensure_calls == [NAME]
+    assert (
+        client.get(f"/v1/instances/{NAME}", headers=auth_headers).json()["ldap_ca"] == "ldap-ca.pem"
+    )
+    # unknown instance / garbage pem
+    assert (
+        client.put(
+            "/v1/instances/nope/ldap-ca", json={"pem": dc_ca_pem}, headers=auth_headers
+        ).status_code
+        == 404
+    )
+    assert (
+        client.put(
+            f"/v1/instances/{NAME}/ldap-ca", json={"pem": "junk"}, headers=auth_headers
+        ).status_code
+        == 422
+    )
+    assert client.put(f"/v1/instances/{NAME}/ldap-ca", json={"pem": dc_ca_pem}).status_code == 401
+
+
+def test_delete_reports_failed_domain_leave(
+    client: TestClient, auth_headers: dict[str, str], instance_data: dict[str, Any], docker: Any
+) -> None:
+    client.post("/v1/instances", json=instance_data, headers=auth_headers)
+    docker.leave_ok = False
+    resp = client.delete(f"/v1/instances/{NAME}", headers=auth_headers)
+    # removed locally, but the failed leave is reported, not hidden
+    assert resp.status_code == 200
+    assert resp.json()["removed"] is True
+    assert resp.json()["domain_leave"]["ok"] is False
+    assert "unreachable" in resp.json()["domain_leave"]["detail"]
+    assert client.get(f"/v1/instances/{NAME}", headers=auth_headers).status_code == 404
+
+
+def test_store_failure_is_500_with_detail(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    instance_data: dict[str, Any],
+    store: Any,
+    monkeypatch: Any,
+) -> None:
+    from lmnradius.store import StoreError
+
+    def _boom(_inst: Any) -> None:
+        raise StoreError("instance change log: git commit exited 128: fatal: not a git repository")
+
+    monkeypatch.setattr(store, "put", _boom)
+    resp = client.post("/v1/instances", json=instance_data, headers=auth_headers)
+    assert resp.status_code == 500
+    assert "change log" in resp.json()["detail"]

@@ -25,10 +25,17 @@ class Reconciler:
         self.store.put(inst)
         return self.docker.ensure_running(inst)
 
-    def remove(self, name: str) -> None:
-        """Remove the container (+ rendered config) then delete the instance from the store."""
-        self.docker.remove(name)
+    def remove(self, name: str) -> dict:
+        """Leave the domain and remove the container, state volume and rendered config,
+        then delete the instance from the store. Returns the domain-leave result
+        (``{"ok", "attempted", "detail"}``) for the operator."""
+        inst = self.store.get(name)
+        if inst is None:
+            leave: dict = {"ok": True, "attempted": False, "detail": "no instance record"}
+        else:
+            leave = self.docker.remove(inst)
         self.store.delete(name)
+        return leave
 
     def reconcile_all(self) -> list[dict]:
         """Ensure every stored instance is running; return their statuses."""

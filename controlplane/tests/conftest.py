@@ -15,9 +15,14 @@ contract in the SPEC (docs/architecture.md).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from starlette.testclient import TestClient
 
 from lmnradius.api import create_app
@@ -122,9 +127,13 @@ class FakeDockerService:
             container["running"] = True
         return self.status(name)
 
-    def remove(self, name: str) -> None:
-        self.removed.append(name)
-        self.containers.pop(name, None)
+    def remove(self, inst: Instance) -> dict[str, Any]:
+        # Mirrors the real service: full teardown incl. the domain leave, whose result
+        # is reported (``leave_ok`` lets a test simulate an unreachable DC).
+        self.removed.append(inst.name)
+        self.containers.pop(inst.name, None)
+        ok = getattr(self, "leave_ok", True)
+        return {"ok": ok, "attempted": True, "detail": "stub leave" if ok else "DC unreachable"}
 
     def status(self, name: str) -> dict[str, Any]:
         container = self.containers.get(name)
@@ -141,6 +150,8 @@ class FakeDockerService:
             "exists": True,
             "running": bool(container["running"]),
             "health": container["health"],
+            "restart_count": 0,
+            "crash_looping": False,
             "image": container["image"],
         }
 
@@ -199,6 +210,45 @@ class FakeDockerService:
             for s in inst.ssids
         ]
         return out
+
+
+def make_cert_pem(common_name: str, ca: bool = True, issuer_key: Any = None) -> str:
+    """A throwaway certificate PEM: self-signed (a trust anchor) by default, or an
+    end-entity certificate signed by ``issuer_key`` (then ``ca=False``)."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    issuer = (
+        name
+        if issuer_key is None
+        else x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test issuer")])
+    )
+    now = datetime.now(timezone.utc)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+    )
+    cert = builder.sign(issuer_key or key, hashes.SHA256())
+    return cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+
+@pytest.fixture(scope="session")
+def dc_ca_pem() -> str:
+    """A self-signed 'DC CA' used as the pinned LDAPS trust anchor in the tests."""
+    return make_cert_pem("test DC CA")
+
+
+@pytest.fixture(scope="session")
+def leaf_cert_pem() -> str:
+    """An end-entity certificate (not self-signed, CA:FALSE) -- what a DC serves when
+    it does not include its CA in the chain."""
+    issuer_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return make_cert_pem("dc.linuxmuster.lan", ca=False, issuer_key=issuer_key)
 
 
 @pytest.fixture
@@ -263,9 +313,11 @@ def auth_headers(token: str) -> dict[str, str]:
 
 
 @pytest.fixture
-def instance_data() -> dict[str, Any]:
-    """A complete, valid Instance body for POST /v1/instances."""
+def instance_data(dc_ca_pem: str) -> dict[str, Any]:
+    """A complete, valid body for POST /v1/instances (ldaps:// + the CA to pin;
+    ``Instance(**instance_data)`` ignores the write-only ``ldap_ca_pem``)."""
     return {
+        "ldap_ca_pem": dc_ca_pem,
         "name": "default-school",
         "realm": "LINUXMUSTER.LAN",
         "workgroup": "LINUXMUSTER",

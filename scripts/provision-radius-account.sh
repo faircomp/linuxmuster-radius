@@ -13,6 +13,8 @@
 #       - join.authfile   (Samba -A Format: username/password/domain) für den net-ads-join
 #       - ldap-bind.secret (global-binduser-Passwort)
 #       - radius.secret    (AP-Shared-Secret, identisch im UniFi-RADIUS-Profil)
+#       - ldap-ca.pem      (KEIN Secret: die linuxmuster-CA /etc/linuxmuster/ssl/cacert.pem,
+#                           die das LDAPS-Zertifikat des DC signiert -> `--ldap-ca`)
 #       Es wird NIE ein Secret ausgegeben.
 #
 # JOIN-KONTO — TEILVERIFIZIERT (Live-E2E gegen echte linuxmuster, 2026-07-12):
@@ -42,6 +44,7 @@ OUT_DIR="${4:-${SECRETS_STAGE:-${PWD}/radius-secrets}}"
 SMB_CONF="${SMB_CONF:-/etc/samba/smb.conf}"
 DEVICES_CSV="${DEVICES_CSV:-/etc/linuxmuster/sophomorix/default-school/devices.csv}"
 BINDUSER_SECRET="${BINDUSER_SECRET:-/etc/linuxmuster/.secret/global-binduser}"
+LMN_CACERT="${LMN_CACERT:-/etc/linuxmuster/ssl/cacert.pem}"
 IMPORT_CMD="linuxmuster-import-devices"
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -131,6 +134,7 @@ mkdir -p "$OUT_DIR"
 JOIN_AUTHFILE="${OUT_DIR}/join.authfile"
 LDAP_BIND_FILE="${OUT_DIR}/ldap-bind.secret"
 RADIUS_SECRET_FILE="${OUT_DIR}/radius.secret"
+LDAP_CA_FILE="${OUT_DIR}/ldap-ca.pem"
 
 # --- join.authfile (Samba -A: username/password/domain) ---
 echo "-- join.authfile (--join-secret) --"
@@ -192,10 +196,25 @@ else
 fi
 echo
 
+# --- ldap-ca.pem (linuxmuster-CA; das DC-Zertifikat aus 'tls certfile' ist von ihr signiert) ---
+echo "-- ldap-ca.pem (--ldap-ca, Pflicht bei ldaps://) --"
+if [ -e "$LDAP_CA_FILE" ]; then
+    echo "   ${LDAP_CA_FILE} existiert bereits — übersprungen."
+elif [ -r "$LMN_CACERT" ]; then
+    cp -- "$LMN_CACERT" "$LDAP_CA_FILE"
+    chmod 0600 "$LDAP_CA_FILE"
+    echo "   kopiert aus ${LMN_CACERT} -> ${LDAP_CA_FILE} (kein Secret; pinnt das LDAPS-Zertifikat des DC)."
+    have openssl && echo "   SHA-256: $(openssl x509 -in "$LDAP_CA_FILE" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)"
+else
+    echo "   ${LMN_CACERT} nicht lesbar — die CA des DC-Zertifikats von Hand als ${LDAP_CA_FILE} ablegen"
+    echo "   (oder auf der RADIUS-VM 'lmnradius create --ldap-ca-tofu' mit Fingerprint-Abgleich)."
+fi
+echo
+
 echo "== Nächste Schritte =="
-echo "  1. Secret-Dateien aus ${OUT_DIR} in den Control-Plane secrets_dir übertragen"
+echo "  1. Dateien aus ${OUT_DIR} in den Control-Plane secrets_dir übertragen"
 echo "     (Namen unverändert lassen: sie sind die --join-secret/--ldap-bind-secret/"
-echo "      --radius-secret-Referenzen in 'lmnradius create')."
+echo "      --radius-secret-Referenzen in 'lmnradius create'; ldap-ca.pem -> --ldap-ca)."
 echo "  2. Auf dem DC ${IMPORT_CMD} laufen lassen (falls oben nicht via RUN_IMPORT=1 erfolgt)."
 echo "  3. Join-Konto: ein einfacher Benutzer kann NICHT joinen (verifiziert) — ins"
 echo "     join.authfile gehört der Administrator bzw. ein delegiertes Join-Konto."

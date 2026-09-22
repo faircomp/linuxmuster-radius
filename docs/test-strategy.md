@@ -35,5 +35,12 @@ Aufruf: `LMNRADIUS_ALLOW_REAL=1 bash scripts/tests/run.sh e2e`.
 - Reject bei falscher Gruppe/SSID-Kombination · Reject ohne `wifi` · Reject bei
   ungültigem Cert-Pinning-Szenario · unbekannter RADIUS-Client (falsches Subnetz) →
   ignoriert · API 401/403 · … _(zu vervollständigen)_
+- **7.3.1 (Fix-Runde 2026-09-22):** `ldaps://` ohne `--ldap-ca` → API 422 (Unit);
+  falsche/fremde DC-CA → Container startet nicht, kein Access-Accept (Lab, negativ);
+  `--client-subnet` in 127.0.0.0/8 (oder jedes CIDR, das 127.0.0.1 enthält) → 422 (Unit);
+  crash-loopender Container → `create`/`reconcile` Exit 1 mit `last_error` (Unit);
+  git-Change-Log ohne konfigurierte Identität → Commit entsteht trotzdem, git-Fehler →
+  `StoreError`/HTTP 500 statt stillem Verlust (Unit); `rm` bei nicht erreichbarem DC →
+  lokal entfernt, Domänen-Austritt als Fehler gemeldet (Unit).
 
 _Details folgen in P1/P2._

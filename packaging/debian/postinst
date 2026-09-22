@@ -41,14 +41,30 @@ chown -R lmnradius:lmnradius /etc/linuxmuster-radius /var/lib/linuxmuster-radius
 # secrets holds per-client shared secrets; certs holds EAP CA + server keys.
 chmod 700 /etc/linuxmuster-radius/secrets /etc/linuxmuster-radius/certs
 
-# Initialize instances_dir as a git repo -> Store changes are committed as a change log
-# (Store._git is best-effort and needs a repo + identity).
+# instances_dir is a git repository = the operator-facing change log of the instance
+# records (Store commits every create/patch/rm). Everything runs AS lmnradius, the owner
+# of the directory (chown above) and the user the service commits as: up to 7.3.0 the
+# repo was initialised and configured as root AFTER the chown, git refused the
+# root-owned-vs-lmnradius-owned mix ("dubious ownership" -> "fatal: not in a git
+# directory"), the identity was never set and every commit died with "empty ident
+# name" -- the change log stayed empty (found on real installs, 2026-09-22).
+# Idempotent: repairs an existing 7.3.0 repo (identity, pending records) on upgrade.
 INST_DIR=/var/lib/linuxmuster-radius/instances
-if command -v git >/dev/null 2>&1 && [ ! -d "$INST_DIR/.git" ]; then
-    git -C "$INST_DIR" init -q || true
-    git -C "$INST_DIR" config user.name  "linuxmuster-radius" || true
-    git -C "$INST_DIR" config user.email "lmnradius@localhost" || true
-    chown -R lmnradius:lmnradius "$INST_DIR/.git" || true
+if command -v git >/dev/null 2>&1; then
+    as_lmnradius() { runuser -u lmnradius -- "$@"; }
+    if [ ! -d "$INST_DIR/.git" ]; then
+        as_lmnradius git -C "$INST_DIR" -c init.defaultBranch=main init -q
+    fi
+    as_lmnradius git -C "$INST_DIR" config user.name  "linuxmuster-radius"
+    as_lmnradius git -C "$INST_DIR" config user.email "lmnradius@localhost"
+    # Records written while the change log was broken (staged but never committed, or
+    # never added) become one import commit, so `git log` is complete after the upgrade.
+    for f in "$INST_DIR"/*.yaml; do
+        [ -e "$f" ] && as_lmnradius git -C "$INST_DIR" add -- "$(basename "$f")"
+    done
+    if ! as_lmnradius git -C "$INST_DIR" diff --cached --quiet; then
+        as_lmnradius git -C "$INST_DIR" commit -q -m "lmnradius: import existing instance records (package configure)"
+    fi
 fi
 
 # Harden the shipped tree on EVERY configure, not only on upgrade: 0.1.6 and earlier

@@ -33,11 +33,12 @@ or config-injection sink), so the examples double as the validation contract.
 | `ldap_base_dn` | LDAP search base DN. |
 | `ldap_bind_dn` | Service-account DN used for the group lookup. |
 | `wifi_group` | AD group whose members may use WLAN at all (default `wifi`). |
-| `client_subnets` | List of AP-management CIDRs allowed in `clients.conf` (>=1, ADR-009). |
+| `client_subnets` | List of AP-management CIDRs allowed in `clients.conf` (>=1, ADR-009). Nothing inside `127.0.0.0/8` (reserved for the image's healthcheck client). |
 | `ssids` | List of `{ name, allowed_group, vlan? }` (>=1). `name` matches `&Called-Station-SSID`; `allowed_group` is the AD group gate; `vlan` (1-4094, optional) is the RFC-3580 dynamic VLAN. |
 | `join_secret` | **Filename** (basename under `secrets_dir`) of the domain-join secret. |
 | `ldap_bind_secret` | **Filename** of the LDAP bind password secret. |
 | `radius_secret` | **Filename** of the per-subnet RADIUS shared secret. |
+| `ldap_ca` | **Filename** (under `certs_dir/<name>/`) of the PEM bundle the DC's LDAPS certificate is verified against (`ldap-ca.pem`, written by the API from `--ldap-ca`/`--ldap-ca-tofu`). Mandatory for `ldaps://` on create; `null` marks a pre-7.3.1 record whose LDAPS link is unverified. |
 | `image` | Data-plane image; carries an explicit `:tag` or `@sha256:<digest>` — **digest-pinned** in production (Renovate, P5). A bare repo is rejected. |
 
 The three `*_secret` fields are **secret file names**, never the secret values —
