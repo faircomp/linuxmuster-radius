@@ -310,7 +310,10 @@ jobs:
           test ! -s opt-leftovers.txt
           test "$(sudo find /opt/linuxmuster-radius -name 'lmnradius-*.dist-info' -printf '%f\n' | sort -u)" = "lmnradius-$pep.dist-info"
           test -z "$(sudo find /opt/linuxmuster-radius -name '*.pyc' ! -name '*.cpython-312.pyc' -print -quit)"
-          test "$(sudo find /opt/linuxmuster-radius -perm -0002 | wc -l)" = 0
+          # Symlinks are always lrwxrwxrwx and chmod cannot change that, so only files
+          # and directories are checked (the venv ships four: bin/python, bin/python3,
+          # bin/python3.12, lib64).
+          test "$(sudo find /opt/linuxmuster-radius \( -type f -o -type d \) -perm -0002 | wc -l)" = 0
 
           # dpkg/apt consistent. dpkg --verify is only a real check with md5sums; up to
           # 7.3.0 the package shipped none, so assert they are there before trusting it.
