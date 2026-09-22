@@ -19,8 +19,12 @@ from lmnradius.models import (
     DEFAULT_IMAGE,
     SSID,
     Instance,
+    InstanceCreate,
     InstancePatch,
+    LdapCaRequest,
     UpdateRequest,
+    is_ldaps,
+    ldap_url_parts,
 )
 
 
@@ -132,6 +136,19 @@ def test_instance_accepts_digest_pinned_image() -> None:
         ("client_subnets", []),
         ("client_subnets", ["not-a-cidr"]),
         ("client_subnets", ["10.0.0.0/16", "nope"]),
+        # loopback is the image's healthcheck client: a client on it crash-loops radiusd
+        # ("Failed to add duplicate client"); anything COVERING 127.0.0.1 is refused too
+        ("client_subnets", ["127.0.0.1/32"]),
+        ("client_subnets", ["127.0.0.0/8"]),
+        ("client_subnets", ["127.5.0.0/16"]),
+        ("client_subnets", ["0.0.0.0/0"]),
+        ("client_subnets", ["10.0.0.0/16", "127.0.0.1/32"]),
+        ("client_subnets", ["::1/128"]),
+        ("client_subnets", ["::/0"]),
+        # ldap_ca is a bare filename under certs_dir/<name>/
+        ("ldap_ca", "../ca.pem"),
+        ("ldap_ca", "sub/ca.pem"),
+        ("ldap_ca", ""),
         # ssids: at least one
         ("ssids", []),
         # secret filenames: no '..', no path separators
@@ -178,3 +195,47 @@ def test_update_request_rejects_bare_repo() -> None:
     with pytest.raises(ValidationError):
         UpdateRequest(image="ubuntu")
     UpdateRequest(image="ghcr.io/faircomp/linuxmuster-radius:0.2.0")  # tag ok
+
+
+def test_loopback_client_subnet_error_names_the_reason() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        Instance(**_base(client_subnets=["127.0.0.1/32"]))
+    assert "healthcheck" in str(excinfo.value)
+
+
+def test_client_subnets_near_loopback_are_fine() -> None:
+    # Neighbouring ranges must not be caught by an over-broad check.
+    inst = Instance(**_base(client_subnets=["126.0.0.0/8", "128.0.0.0/8", "10.0.0.0/8"]))
+    assert len(inst.client_subnets) == 3
+
+
+def test_ldap_ca_defaults_to_none_for_legacy_records() -> None:
+    # A 7.3.0 record has no ldap_ca key -> loads, flagged as unverified by the CLI.
+    inst = Instance(**_base())
+    assert inst.ldap_ca is None
+    assert Instance(**_base(ldap_ca="ldap-ca.pem")).ldap_ca == "ldap-ca.pem"
+
+
+def test_instance_create_carries_write_only_pem() -> None:
+    body = InstanceCreate(**_base(ldap_ca_pem="-----BEGIN CERTIFICATE-----\nx\n"))
+    assert body.ldap_ca_pem is not None
+    # the persisted Instance shape must not contain it
+    assert "ldap_ca_pem" not in Instance.model_fields
+    assert "ldap_ca" in InstancePatch.model_fields
+
+
+@pytest.mark.parametrize("bad", ["", "x" * (64 * 1024 + 1)])
+def test_pem_bodies_reject_empty_and_oversized(bad: str) -> None:
+    with pytest.raises(ValidationError):
+        InstanceCreate(**_base(ldap_ca_pem=bad))
+    with pytest.raises(ValidationError):
+        LdapCaRequest(pem=bad)
+
+
+def test_ldap_url_parts_and_is_ldaps() -> None:
+    assert ldap_url_parts("ldaps://dc.example.lan") == ("ldaps", "dc.example.lan", 636)
+    assert ldap_url_parts("LDAPS://dc.example.lan:3269") == ("ldaps", "dc.example.lan", 3269)
+    assert ldap_url_parts("ldap://10.0.0.1") == ("ldap", "10.0.0.1", 389)
+    assert is_ldaps("ldaps://dc") and not is_ldaps("ldap://dc")
+    with pytest.raises(ValueError):
+        ldap_url_parts("http://dc.example.lan")

@@ -19,6 +19,9 @@ On-disk layout under ``certs_dir`` (see :mod:`lmnradius.docker_service`):
 * ``<name>/server.key`` — RSA-2048 server key, PKCS8, *unencrypted*, mode 0600
 * ``<name>/server.pem`` — signed EAP server certificate, PEM
 * ``<name>/ca.pem``     — a copy of ``ca/ca.cert.pem`` (the mounted trust anchor)
+* ``<name>/ldap-ca.pem`` — the pinned DC CA bundle for LDAPS verification (mode 0600;
+  not part of the EAP CA, but it lives beside the instance's cert material and is
+  mounted read-only into the container as ``LDAP_CA``)
 
 The CA directory and every per-instance directory are mode 0700.
 """
@@ -36,6 +39,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+from .models import LDAP_CA_FILE
 
 _log = logging.getLogger("lmnradius.ca")
 
@@ -349,3 +354,63 @@ def cert_status(certs_dir: str, name: str) -> dict[str, Any] | None:
         return None
     cert = x509.load_pem_x509_certificate(Path(cert_path).read_bytes())
     return _describe_server(cert)
+
+
+# -- DC CA for LDAPS verification ---------------------------------------------
+
+
+def describe_pem_bundle(pem: str) -> list[dict[str, Any]]:
+    """Parse a PEM bundle and describe every certificate in it.
+
+    ``trust_anchor`` marks a self-signed certificate (subject == issuer): with one in
+    the bundle the container verifies the DC's chain up to it (``verifyChain``);
+    without one it pins the end-entity certificate(s) as served (``verifyPeer``).
+
+    :raises ValueError: the text holds no parseable certificate.
+    """
+    try:
+        certs = x509.load_pem_x509_certificates(pem.encode("utf-8"))
+    except ValueError as exc:
+        raise ValueError(f"no PEM certificate found: {exc}") from exc
+    out: list[dict[str, Any]] = []
+    for cert in certs:
+        try:
+            is_ca = bool(cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca)
+        except x509.ExtensionNotFound:
+            is_ca = False
+        out.append(
+            {
+                "subject": cert.subject.rfc4514_string(),
+                "issuer": cert.issuer.rfc4514_string(),
+                "not_after": _iso(cert.not_valid_after_utc),
+                "sha256_fingerprint": cert.fingerprint(hashes.SHA256()).hex(),
+                "is_ca": is_ca,
+                "trust_anchor": cert.subject == cert.issuer,
+            }
+        )
+    return out
+
+
+def write_ldap_ca(certs_dir: str, name: str, pem: str) -> dict[str, Any]:
+    """Store the DC CA bundle for instance ``name`` as ``<name>/ldap-ca.pem`` (0600).
+
+    :raises ValueError: bad instance name or a bundle without a certificate.
+    :returns: ``{"file", "certificates", "trust_anchor"}`` — the stored filename, the
+        :func:`describe_pem_bundle` view and whether the bundle contains a trust
+        anchor (chain verification) or only pins the served certificate(s).
+    """
+    _safe_name(name)
+    certs = describe_pem_bundle(pem)
+    inst_dir = os.path.join(certs_dir, name)
+    os.makedirs(inst_dir, exist_ok=True)
+    os.chmod(inst_dir, 0o700)
+    _write_file(os.path.join(inst_dir, LDAP_CA_FILE), pem.encode("utf-8"), 0o600)
+    anchored = any(c["trust_anchor"] for c in certs)
+    _log.info(
+        "pinned DC CA bundle instance=%s certificates=%d trust_anchor=%s fingerprints=%s",
+        name,
+        len(certs),
+        anchored,
+        ",".join(c["sha256_fingerprint"] for c in certs),
+    )
+    return {"file": LDAP_CA_FILE, "certificates": certs, "trust_anchor": anchored}

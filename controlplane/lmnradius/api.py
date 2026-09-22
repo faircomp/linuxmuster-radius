@@ -21,13 +21,16 @@ from .models import (
     CaInitRequest,
     CertIssueRequest,
     Instance,
+    InstanceCreate,
     InstancePatch,
+    LdapCaRequest,
     TestRequest,
     UpdateRequest,
+    is_ldaps,
 )
 from .reconciler import Reconciler
 from .security import make_verify_token
-from .store import Store
+from .store import Store, StoreError
 from .updater import Updater
 
 audit = logging.getLogger("lmnradius.audit")
@@ -75,6 +78,15 @@ def create_app(
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": f"permission denied (check owner lmnradius / mode 0600): {exc}"},
+        )
+
+    # The instance change log (git) refused a commit: a server-side problem the
+    # operator must fix (docs/operations.md), reported with git's own message.
+    @app.exception_handler(StoreError)
+    async def _store_failed(_request: Request, exc: StoreError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": str(exc)},
         )
 
     auth = [Depends(verify)]
@@ -131,16 +143,56 @@ def create_app(
         audit.info("update-all to default image=%s", DEFAULT_IMAGE)
         return {"results": updater.update_all(DEFAULT_IMAGE)}
 
+    def _pin_ldap_ca(name: str, pem: str) -> dict[str, Any]:
+        try:
+            info = ca.write_ldap_ca(settings.certs_dir, name, pem)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"ldap_ca_pem: {exc}"
+            ) from exc
+        audit.info(
+            "pin DC CA instance=%s trust_anchor=%s fingerprints=%s",
+            name,
+            info["trust_anchor"],
+            ",".join(c["sha256_fingerprint"] for c in info["certificates"]),
+        )
+        return info
+
     # --------------------------------------------------------------- instances
+    # `def`, not `async def`: apply() blocks on docker-py and then watches the new
+    # container for up to ~45 s (docker_service._wait_settled); on the event loop that
+    # would stall /v1/health for the whole time.
     @app.post(
         "/v1/instances",
         dependencies=auth,
         status_code=status.HTTP_201_CREATED,
     )
-    async def create_instance(inst: Instance) -> dict[str, Any]:
+    def create_instance(body: InstanceCreate) -> dict[str, Any]:
+        inst = Instance.model_validate(body.model_dump(exclude={"ldap_ca_pem", "container_name"}))
+        pinned: dict[str, Any] | None = None
+        if body.ldap_ca_pem is not None:
+            pinned = _pin_ldap_ca(inst.name, body.ldap_ca_pem)
+            inst = inst.model_copy(update={"ldap_ca": pinned["file"]})
+        elif is_ldaps(inst.ldap_server) and inst.ldap_ca is None:
+            # Strict by default: the role gate and the VLAN decision ride on this LDAPS
+            # link, so a new instance must verify the DC's certificate.
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "LDAPS certificate verification is mandatory: pass --ldap-ca <file> "
+                    "(the CA that signed the DC's certificate; on a linuxmuster.net server "
+                    "/etc/linuxmuster/ssl/cacert.pem) or --ldap-ca-tofu (pin what the DC "
+                    "serves now; verify the fingerprint out of band)"
+                ),
+            )
         result = reconciler.apply(inst)
-        audit.info("create instance name=%s image=%s", inst.name, inst.image)
-        return {"instance": inst, "status": result}
+        audit.info(
+            "create instance name=%s image=%s ldap_ca=%s", inst.name, inst.image, inst.ldap_ca
+        )
+        out: dict[str, Any] = {"instance": inst, "status": result}
+        if pinned is not None:
+            out["ldap_ca"] = pinned
+        return out
 
     @app.get("/v1/instances", dependencies=auth)
     async def list_instances() -> list[Instance]:
@@ -151,7 +203,7 @@ def create_app(
         return _require(name)
 
     @app.patch("/v1/instances/{name}", dependencies=auth)
-    async def patch_instance(name: str, patch: InstancePatch) -> dict[str, Any]:
+    def patch_instance(name: str, patch: InstancePatch) -> dict[str, Any]:
         existing = _require(name)
         updates = patch.model_dump(exclude_unset=True)
         # Re-validate the merged instance through Instance's validators. `name` is a
@@ -170,15 +222,31 @@ def create_app(
         )
         return {"instance": merged, "status": result}
 
-    @app.delete(
-        "/v1/instances/{name}",
-        dependencies=auth,
-        status_code=status.HTTP_204_NO_CONTENT,
-    )
-    async def delete_instance(name: str) -> None:
+    @app.delete("/v1/instances/{name}", dependencies=auth)
+    def delete_instance(name: str) -> dict[str, Any]:
+        """Remove the instance: leave the domain (DNS record + computer account),
+        drop container, state volume, rendered config and the record. 200 with the
+        domain-leave result -- a failed leave is reported, never hidden."""
         _require(name)
-        reconciler.remove(name)
-        audit.info("delete instance name=%s", name)
+        leave = reconciler.remove(name)
+        audit.info(
+            "delete instance name=%s domain_leave_ok=%s attempted=%s",
+            name,
+            leave.get("ok"),
+            leave.get("attempted"),
+        )
+        return {"name": name, "removed": True, "domain_leave": leave}
+
+    @app.put("/v1/instances/{name}/ldap-ca", dependencies=auth)
+    def set_ldap_ca(name: str, body: LdapCaRequest) -> dict[str, Any]:
+        """Pin (or re-pin) the CA bundle the DC's LDAPS certificate is verified
+        against, then re-apply the instance (the container is recreated with it)."""
+        existing = _require(name)
+        pinned = _pin_ldap_ca(name, body.pem)
+        merged = existing.model_copy(update={"ldap_ca": pinned["file"]})
+        result = reconciler.apply(merged)
+        audit.info("set ldap-ca instance=%s", name)
+        return {"instance": merged, "status": result, "ldap_ca": pinned}
 
     # ----------------------------------------------------------- lifecycle ops
     @app.post("/v1/instances/{name}/start", dependencies=auth)

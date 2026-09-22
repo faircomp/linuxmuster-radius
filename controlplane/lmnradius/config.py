@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # untrusted interface.
     log_max_size: str = "20m"  # docker json-log cap per container (live view)
     log_max_file: int = 5
+    # LAN IPv4 of this host, registered by the container as the A record of
+    # server_fqdn (never the container's bridge address). None = auto-detect: the
+    # address that routes to the DC, else the default-route interface. Set it on a
+    # multi-homed host where the APs/DC must reach a specific address.
+    host_ip: str | None = None
 
     model_config = SettingsConfigDict(env_prefix=_ENV_PREFIX)
 

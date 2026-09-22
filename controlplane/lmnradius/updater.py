@@ -134,7 +134,10 @@ class Updater:
                 return True
             if health == "unhealthy":
                 return False
-            # Exists but crashed/exited: no healthcheck will ever pass -> fail fast.
+            # Exists but crashed/exited or restart-looping: no healthcheck will ever
+            # pass -> fail fast (crash_looping comes from docker_service.state_view).
+            if st.get("crash_looping"):
+                return False
             if st.get("exists") and not st.get("running") and health is None:
                 return False
             if time.monotonic() >= deadline:

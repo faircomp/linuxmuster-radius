@@ -50,6 +50,39 @@ _IMAGE_RE = re.compile(
     r"^[a-z0-9][a-z0-9._/:-]*(?::[A-Za-z0-9][A-Za-z0-9._-]{0,127}|@sha256:[a-f0-9]{64})$"
 )
 
+# Loopback is reserved for the image's own healthcheck client (entrypoint appends
+# `client healthcheck-loopback { ipaddr = 127.0.0.1 }`): a client_subnet covering it
+# makes radiusd fail its config check ("Failed to add duplicate client") and the
+# instance crash-loops (seen on a real deployment, 2026-09-22). Requests from the host
+# itself reach the container from the Docker bridge (172.17.0.1), never from loopback,
+# so a loopback client could not serve a local test either.
+_LOOPBACK_V4 = ipaddress.ip_network("127.0.0.0/8")
+_LOOPBACK_V6 = ipaddress.ip_network("::1/128")
+# Filename of the pinned DC CA bundle inside ``certs_dir/<name>/`` (written by the API,
+# mounted read-only into the container as LDAP_CA). Kept here so the model default and
+# ca.write_ldap_ca() cannot drift apart.
+LDAP_CA_FILE = "ldap-ca.pem"
+
+
+def ldap_url_parts(url: str) -> tuple[str, str, int]:
+    """Split a validated ``ldap_server`` URI into ``(scheme, host, port)``.
+
+    The port defaults to 636 for ``ldaps`` and 389 for ``ldap``. Shared by the API
+    (is this LDAPS?) and the CLI (``--ldap-ca-tofu`` needs host:port).
+    """
+    match = re.match(r"^(ldaps?)://([^/:]+)(?::(\d+))?$", url.strip(), re.IGNORECASE)
+    if match is None:
+        raise ValueError(f"not an ldap(s):// URI: {url!r}")
+    scheme = match.group(1).lower()
+    port = int(match.group(3)) if match.group(3) else (636 if scheme == "ldaps" else 389)
+    return scheme, match.group(2), port
+
+
+def is_ldaps(url: str) -> bool:
+    """True if ``url`` is an ``ldaps://`` URI (TLS to the DC, i.e. verifiable)."""
+    return url.strip().lower().startswith("ldaps://")
+
+
 # Default data-plane image for new/updated instances, so callers need not pass
 # --image. Pinned to an immutable ``@sha256:<digest>`` — the data-plane image built and
 # published to GHCR by the build-image workflow (verified end-to-end against a real DC);
@@ -109,6 +142,11 @@ class Instance(BaseModel):
     ldap_bind_secret: str
     radius_secret: str
     image: str = DEFAULT_IMAGE
+    # Filename (under certs_dir/<name>/) of the PEM bundle the DC's LDAPS certificate
+    # is verified against; ``None`` = unverified (records from 7.3.0 and earlier).
+    # New instances on ldaps:// must carry one (the API refuses otherwise); the CLI
+    # flags every instance that still lacks it.
+    ldap_ca: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -168,9 +206,17 @@ class Instance(BaseModel):
             raise ValueError("client_subnets must list at least one AP-management CIDR")
         for cidr in v:
             try:
-                ipaddress.ip_network(cidr, strict=False)
+                net = ipaddress.ip_network(cidr, strict=False)
             except ValueError as exc:
                 raise ValueError(f"invalid CIDR {cidr!r}") from exc
+            loopback = _LOOPBACK_V4 if net.version == 4 else _LOOPBACK_V6
+            if net.overlaps(loopback):
+                raise ValueError(
+                    f"client_subnet {cidr!r} covers loopback, which is reserved for the "
+                    "container's healthcheck client (the instance would crash-loop); for a "
+                    "local test use the host's LAN address (requests from the host arrive "
+                    "from the Docker bridge, not from loopback)"
+                )
         return v
 
     @field_validator("ssids")
@@ -195,6 +241,17 @@ class Instance(BaseModel):
     def _v_image(cls, v: str) -> str:
         if not _IMAGE_RE.match(v):
             raise ValueError("image must carry an explicit :tag or @sha256:<digest> (no bare repo)")
+        return v
+
+    @field_validator("ldap_ca")
+    @classmethod
+    def _v_ldap_ca(cls, v: str | None) -> str | None:
+        # Same shape as the secret references: a bare filename under certs_dir/<name>/.
+        if v is not None and (".." in v or not _SECRET_RE.match(v)):
+            raise ValueError(
+                "ldap_ca must be a bare filename ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ "
+                "(no path separators or '..')"
+            )
         return v
 
     @computed_field  # type: ignore[prop-decorator]
@@ -225,6 +282,43 @@ class InstancePatch(BaseModel):
     ldap_bind_secret: str | None = None
     radius_secret: str | None = None
     image: str | None = None
+    ldap_ca: str | None = None
+
+
+# Upper bound for a PEM bundle submitted over the API (a CA chain is a few KiB).
+_PEM_MAX_LEN = 64 * 1024
+
+
+class InstanceCreate(Instance):
+    """Body for ``POST /v1/instances``: an :class:`Instance` plus the optional
+    write-only ``ldap_ca_pem``.
+
+    ``ldap_ca_pem`` is the PEM bundle (the DC's CA, or the chain the DC served in
+    trust-on-first-use mode) the API stores under ``certs_dir/<name>/`` and then
+    references as ``ldap_ca``; it is never persisted in the instance record.
+    """
+
+    ldap_ca_pem: str | None = None
+
+    @field_validator("ldap_ca_pem")
+    @classmethod
+    def _v_ldap_ca_pem(cls, v: str | None) -> str | None:
+        if v is not None and not 0 < len(v) <= _PEM_MAX_LEN:
+            raise ValueError(f"ldap_ca_pem must be 1..{_PEM_MAX_LEN} characters of PEM")
+        return v
+
+
+class LdapCaRequest(BaseModel):
+    """Body for ``PUT /v1/instances/{name}/ldap-ca`` — pin (or re-pin) the DC CA."""
+
+    pem: str
+
+    @field_validator("pem")
+    @classmethod
+    def _v_pem(cls, v: str) -> str:
+        if not 0 < len(v) <= _PEM_MAX_LEN:
+            raise ValueError(f"pem must be 1..{_PEM_MAX_LEN} characters of PEM")
+        return v
 
 
 class UpdateRequest(BaseModel):
