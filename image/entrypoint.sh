@@ -42,8 +42,13 @@ set -eu
 : "${SERVICE_USER:=freerad}"             # the user radiusd drops to (Ubuntu default)
 : "${WINBIND_WAIT:=60}"                  # bounded winbind-trust wait, in seconds
 : "${HEALTHCHECK_SECRET:=lmnradius-loopback}"  # loopback Status-Server probe secret
-: "${LDAP_CA:=}"                         # optional: PEM CA to verify the DC's LDAPS cert (stunnel)
+: "${LDAP_CA:=}"                         # PEM to verify the DC's LDAPS cert (stunnel); unset = UNVERIFIED (warned)
 : "${LDAP_STUNNEL_PORT:=3890}"           # loopback port where stunnel exposes plaintext LDAP
+: "${HOST_IP:=}"                         # the host's LAN IPv4; registered as the A record of SERVER_FQDN
+case "${HOST_IP}" in
+  ""|[0-9]*.[0-9]*.[0-9]*.[0-9]*) : ;;
+  *) echo "FATAL: HOST_IP='${HOST_IP}' is not an IPv4 literal." >&2; exit 1 ;;
+esac
 
 RUN=/run/lmnradius
 BAKED=/etc/freeradius/3.0
@@ -104,15 +109,6 @@ export KRB5RCACHEDIR="${RUN}"
 export LDAPCONF="${RUN}/ldap.conf"
 printf 'SASL_NOCANON on\n' > "${LDAPCONF}"
 
-# ---- copy EAP cert material onto tmpfs, then point the module vars at the copies ----
-# (mods/eap.template references ${EAP_CA} ${EAP_CERT} ${EAP_KEY} directly.)
-copy_secret "${EAP_CA}"   "${RUN}/eap/ca.pem"     0644 "${SERVICE_USER}:${SERVICE_USER}"
-copy_secret "${EAP_CERT}" "${RUN}/eap/server.pem" 0644 "${SERVICE_USER}:${SERVICE_USER}"
-copy_secret "${EAP_KEY}"  "${RUN}/eap/server.key" 0600 "${SERVICE_USER}:${SERVICE_USER}"
-EAP_CA="${RUN}/eap/ca.pem"
-EAP_CERT="${RUN}/eap/server.pem"
-EAP_KEY="${RUN}/eap/server.key"
-
 # ---- LDAP bind password: read the literal into a var (rlm_ldap needs the value, not a
 # path). It is only ever written into the rendered ldap mod on tmpfs, never echoed. ----
 if [ ! -r "${LDAP_BIND_SECRET}" ]; then
@@ -154,10 +150,42 @@ case "${_scheme}" in
     [ -n "${_dchost}" ] || { echo "FATAL: could not parse a host from LDAP_SERVER='${LDAP_SERVER}'." >&2; exit 1; }
     STUNNEL_LDAP_CONF="${RUN}/stunnel-ldap.conf"
     LDAP_SERVER_EFFECTIVE="ldap://127.0.0.1:${LDAP_STUNNEL_PORT}"
-    # stunnel client config on tmpfs. Verify the DC cert only when a CA is mounted
-    # (LDAP_CA); otherwise connect without verification, matching the prior rlm_ldap
-    # 'require_cert = allow' posture on the trusted RADIUS<->DC link. Empty pid = no
-    # pidfile (read-only rootfs); foreground + syslog=no => logs go to stderr.
+    # DC certificate verification (LDAP_CA, a PEM bundle mounted by the control plane).
+    # The role gate and the VLAN decision ride on this connection, so an unverified
+    # LDAPS link lets an on-path attacker between RADIUS and DC answer the group lookup
+    # (docs/threat-model.md). Two pin modes, decided from the bundle's CONTENT:
+    #   chain: the bundle holds a trust anchor (a self-signed CA, e.g. the linuxmuster
+    #          CA /etc/linuxmuster/ssl/cacert.pem) -> verify the chain up to it and check
+    #          the host name; survives DC certificate renewals.
+    #   peer:  end-entity certificate(s) only (trust-on-first-use of what the DC served)
+    #          -> the DC's certificate itself must be in the bundle (stunnel verifyPeer);
+    #          a renewed DC certificate then fails closed until the pin is refreshed.
+    # LDAP_CA set but unusable => FATAL (never silently fall back to no verification).
+    LDAP_CA_MODE=""
+    if [ -n "${LDAP_CA}" ]; then
+        if [ ! -r "${LDAP_CA}" ]; then
+            echo "FATAL: LDAP_CA='${LDAP_CA}' is set but not readable; refusing to talk to the DC without certificate verification." >&2
+            exit 1
+        fi
+        LDAP_CA_MODE=peer
+        _ncert=0
+        awk -v out="${RUN}/ldapca" 'BEGIN{n=0} /-----BEGIN CERTIFICATE-----/{n++} n>0{print > (out "-" n ".pem")}' "${LDAP_CA}"
+        for _f in "${RUN}"/ldapca-*.pem; do
+            [ -e "${_f}" ] || continue
+            _ncert=$((_ncert + 1))
+            # A certificate that verifies against itself is a self-signed trust anchor.
+            if openssl verify -no-CAfile -no-CApath -CAfile "${_f}" "${_f}" >/dev/null 2>&1; then
+                LDAP_CA_MODE=chain
+            fi
+        done
+        rm -f "${RUN}"/ldapca-*.pem
+        if [ "${_ncert}" -eq 0 ]; then
+            echo "FATAL: LDAP_CA='${LDAP_CA}' contains no PEM certificate." >&2
+            exit 1
+        fi
+    fi
+    # stunnel client config on tmpfs. Empty pid = no pidfile (read-only rootfs);
+    # foreground + syslog=no => logs go to stderr.
     {
         printf 'foreground = yes\n'
         printf 'pid =\n'
@@ -170,15 +198,27 @@ case "${_scheme}" in
         printf 'client = yes\n'
         printf 'accept = 127.0.0.1:%s\n' "${LDAP_STUNNEL_PORT}"
         printf 'connect = %s:%s\n' "${_dchost}" "${_dcport}"
-        if [ -n "${LDAP_CA}" ] && [ -r "${LDAP_CA}" ]; then
+        case "${LDAP_CA_MODE}" in
+          chain)
             printf 'CAfile = %s\n' "${LDAP_CA}"
             printf 'verifyChain = yes\n'
-            printf 'checkHost = %s\n' "${_dchost}"
-        elif [ -n "${LDAP_CA}" ]; then
-            echo "WARN: LDAP_CA='${LDAP_CA}' is set but not readable; connecting to the DC WITHOUT certificate verification." >&2
-        fi
+            # checkHost matches DNS names (SAN, CN fallback); an IP literal needs checkIP.
+            case "${_dchost}" in
+              *[!0-9.]*) printf 'checkHost = %s\n' "${_dchost}" ;;
+              *)         printf 'checkIP = %s\n' "${_dchost}" ;;
+            esac
+            ;;
+          peer)
+            printf 'CAfile = %s\n' "${LDAP_CA}"
+            printf 'verifyPeer = yes\n'
+            ;;
+        esac
     } > "${STUNNEL_LDAP_CONF}"
-    echo "linuxmuster-radius: LDAPS to ${_dchost}:${_dcport} is tunnelled via stunnel on 127.0.0.1:${LDAP_STUNNEL_PORT}." >&2
+    case "${LDAP_CA_MODE}" in
+      chain) echo "linuxmuster-radius: LDAPS to ${_dchost}:${_dcport} via stunnel on 127.0.0.1:${LDAP_STUNNEL_PORT}; DC certificate verified against the CA in LDAP_CA (chain + host name)." >&2 ;;
+      peer)  echo "linuxmuster-radius: LDAPS to ${_dchost}:${_dcport} via stunnel on 127.0.0.1:${LDAP_STUNNEL_PORT}; DC certificate pinned to the certificate(s) in LDAP_CA (trust on first use; a renewed DC certificate fails closed)." >&2 ;;
+      *)     echo "WARN: LDAPS to ${_dchost}:${_dcport} is UNVERIFIED (no LDAP_CA): an on-path attacker can spoof the group lookup. Pin the DC's CA (lmnradius set-ldap-ca)." >&2 ;;
+    esac
     ;;
   ldap|"")
     : # plaintext LDAP straight through; libldap does no TLS, so there is no crash
@@ -199,6 +239,40 @@ ALLOW='${INSTANCE} ${REALM} ${WORKGROUP} ${SERVER_FQDN} ${DNS_DOMAIN} ${SMB_CONF
 
 render "${TPL}/smb.conf.template"  "${SMB_CONF}"
 render "${TPL}/krb5.conf.template" "${KRB5_CONFIG}"
+
+# ---- action: leave (one-off container run by `lmnradius rm`) ----
+# Same image, env, secrets and state volume as the instance; instead of serving RADIUS
+# it removes the A record of SERVER_FQDN and deletes the computer account (net ads
+# leave with the join credentials), then exits. The control plane drops the state
+# volume afterwards. Nothing below this block (EAP material, radiusd) is needed here.
+if [ "${1:-}" = "leave" ]; then
+    echo "linuxmuster-radius: leaving ${REALM}: removing the DNS record and the computer account of ${SERVER_FQDN}..." >&2
+    _rc=0
+    # The A record was registered with the machine account (see the join below), so
+    # the machine credentials (-P) may remove it; the join account is the fallback.
+    if ! timeout 90 net ads dns unregister --configfile="${SMB_CONF}" -P "${SERVER_FQDN}" >&2 \
+       && ! timeout 90 net ads dns unregister --configfile="${SMB_CONF}" -A "${JOIN_AUTH_FILE}" "${SERVER_FQDN}" >&2; then
+        echo "WARN: could not remove the DNS A record of ${SERVER_FQDN}; delete it on the DC (samba-tool dns delete ...)." >&2
+        _rc=1
+    fi
+    if timeout 90 net ads leave --configfile="${SMB_CONF}" -A "${JOIN_AUTH_FILE}" >&2; then
+        echo "linuxmuster-radius: left ${REALM}; the computer account is deleted." >&2
+    else
+        echo "FATAL: net ads leave failed; delete the computer account on the DC by hand (samba-tool computer delete <NAME>\$)." >&2
+        _rc=1
+    fi
+    exit "${_rc}"
+fi
+
+# ---- copy EAP cert material onto tmpfs, then point the module vars at the copies ----
+# (mods/eap.template references ${EAP_CA} ${EAP_CERT} ${EAP_KEY} directly; the export
+# above keeps the reassigned values exported for the renders below.)
+copy_secret "${EAP_CA}"   "${RUN}/eap/ca.pem"     0644 "${SERVICE_USER}:${SERVICE_USER}"
+copy_secret "${EAP_CERT}" "${RUN}/eap/server.pem" 0644 "${SERVICE_USER}:${SERVICE_USER}"
+copy_secret "${EAP_KEY}"  "${RUN}/eap/server.key" 0600 "${SERVICE_USER}:${SERVICE_USER}"
+EAP_CA="${RUN}/eap/ca.pem"
+EAP_CERT="${RUN}/eap/server.pem"
+EAP_KEY="${RUN}/eap/server.key"
 
 # ---- assemble the FreeRADIUS config tree on tmpfs ----
 # -dR --preserve=mode (NOT `cp -a`): the hardened run profile drops CAP_FOWNER, so a
@@ -299,12 +373,29 @@ chown -R "${SERVICE_USER}:${SERVICE_USER}" "${RADDB}" "${RUN}/log" "${RUN}/run"
 # pre-created computer account (the linuxmuster devices.csv path) is adopted by name —
 # there is NO 'MEMBER' positional for 'net ads' (that is 'net rpc join'), and passing it
 # makes net treat MEMBER as the domain. (Verified against a real Samba AD, 2026-07-12.)
+# --no-dns-updates: the join's own dynamic-DNS update would register the CONTAINER's
+# bridge address (172.17.0.x) as the A record of SERVER_FQDN -- unreachable for
+# anything that resolves the RADIUS name through the AD DNS (seen on a real DC,
+# 2026-09-22). The host's LAN address is registered below from HOST_IP instead.
 if net ads testjoin --configfile="${SMB_CONF}" >/dev/null 2>&1; then
     echo "linuxmuster-radius: already joined to ${REALM} (machine secret present)." >&2
 else
     echo "linuxmuster-radius: joining ${REALM} as a member (one-time)..." >&2
-    net ads join --configfile="${SMB_CONF}" -A "${JOIN_AUTH_FILE}"
+    net ads join --configfile="${SMB_CONF}" -A "${JOIN_AUTH_FILE}" --no-dns-updates
     echo "linuxmuster-radius: domain join completed." >&2
+fi
+
+# ---- DNS: A record of SERVER_FQDN -> HOST_IP, with the machine account (-P) ----
+# On every start, so a host that changed its address (or one upgraded from a release
+# whose join registered the bridge IP) converges to the right record. Best-effort: on
+# the devices.csv path the record is owned by linuxmuster-import-devices and the
+# machine account may not be allowed to rewrite it -- then the WARN is informational.
+if [ -n "${HOST_IP}" ]; then
+    if timeout 60 net ads dns register --configfile="${SMB_CONF}" -P "${SERVER_FQDN}" "${HOST_IP}" >&2; then
+        echo "linuxmuster-radius: DNS A record ${SERVER_FQDN} -> ${HOST_IP} registered." >&2
+    else
+        echo "WARN: could not register the DNS A record ${SERVER_FQDN} -> ${HOST_IP}; make sure it exists on the DC (devices.csv + linuxmuster-import-devices)." >&2
+    fi
 fi
 
 # ---- finalize the winbind privileged pipe perms ----
