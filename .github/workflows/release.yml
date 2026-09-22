@@ -11,6 +11,11 @@ on:
   push:
     tags: ['v[0-9]*']
   workflow_dispatch:
+    inputs:
+      prev_tag:
+        description: 'upgrade smoke: tag to upgrade from (empty = newest published release)'
+        required: false
+        default: ''
 
 jobs:
   gate:
@@ -82,8 +87,195 @@ jobs:
           ver="$(dpkg-query -W -f='${Version}' linuxmuster-radius)"
           test "$(sudo /opt/linuxmuster-radius/venv/bin/python -c 'from importlib.metadata import version; print(version("lmnradius"))')" = "${ver//\~/}"
 
+  # Kevin's rule: a release must still install cleanly ON TOP OF the version that is
+  # already running on a school server. This job installs the newest published release,
+  # puts realistic config/state in place, upgrades to the freshly built package and
+  # checks that nothing was lost. It skips itself on the very first release.
+  upgrade-smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read        # restrictive org defaults must not break the asset download
+    steps:
+      - uses: actions/checkout@v4          # needed for dpkg-parsechangelog and the fixtures
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: packages/
+      - name: Fetch the published release to upgrade from
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          mkdir -p previous
+          tag="${{ github.event.inputs.prev_tag }}"
+          if [ -z "$tag" ]; then
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 20 \
+                    --json tagName,isDraft,isPrerelease \
+                    --jq '[.[] | select(.isDraft == false and .isPrerelease == false)][0].tagName // ""')
+          fi
+          if [ -z "$tag" ]; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "::notice::no published release yet, upgrade smoke skipped"
+            exit 0
+          fi
+          for i in 1 2 3; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' --dir previous && break
+            echo "download attempt $i failed, retrying"; sleep 10
+          done
+          test -n "$(ls previous/*.deb 2>/dev/null)"
+          echo "::notice::upgrading from $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Install the released version, upgrade to the built one
+        if: steps.prev.outputs.skip != '1'
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y ./previous/*.deb
+
+          # ---------------------------------------------------------------- state BEFORE
+          # The state an admin has on a running server, created exactly the way
+          # docs/install.md tells them to. Everything below goes through the control-plane
+          # API, so wait for it first (the postinst starts the service).
+          for _ in $(seq 1 30); do sudo lmnradius health >/dev/null 2>&1 && break; sleep 1; done
+          sudo lmnradius health
+
+          # install.md step 3 - the three secret files, owner lmnradius, mode 0600.
+          for s in join.authfile ldap-bind.secret radius.secret; do
+            printf 'ci-%s\n' "$s" | sudo tee "/etc/linuxmuster-radius/secrets/$s" >/dev/null
+            sudo chown lmnradius:lmnradius "/etc/linuxmuster-radius/secrets/$s"
+            sudo chmod 600 "/etc/linuxmuster-radius/secrets/$s"
+          done
+
+          # install.md step 4 - the EAP CA. Pure crypto: no DC, no Docker.
+          sudo lmnradius ca init --passphrase ci
+
+          # install.md step 5 - the instance record. `create` also reconciles and the
+          # container cannot come up here (no DC), but Reconciler.apply() stores the
+          # record and renders instance.d/ BEFORE Docker is touched and the EAP cert is
+          # still missing at this point, so the call fails closed with 409 while leaving
+          # exactly the state this job is about -- hence `|| true`, and hence `cert issue`
+          # afterwards. The timeout is a ceiling for the image pull docker_service does
+          # first, not a wait. ldap:// on purpose: from 7.3.1 on an ldaps:// instance must
+          # pin a CA with --ldap-ca, a flag the older releases this job can upgrade from
+          # (prev_tag=v0.1.6) do not have.
+          sudo timeout 300 lmnradius create --name ci \
+            --realm LINUXMUSTER.LAN --workgroup LINUXMUSTER \
+            --server-fqdn radius.linuxmuster.lan \
+            --ldap-server ldap://dc.linuxmuster.lan \
+            --ldap-base-dn 'OU=SCHOOLS,DC=linuxmuster,DC=lan' \
+            --ldap-bind-dn 'CN=global-binduser,OU=Management,OU=GLOBAL,DC=linuxmuster,DC=lan' \
+            --client-subnet 10.0.0.0/16 \
+            --ssid 'lehrer-wlan:role-teacher:20' \
+            --ssid 'schueler-wlan:role-student:10' \
+            --join-secret join.authfile \
+            --ldap-bind-secret ldap-bind.secret \
+            --radius-secret radius.secret || true
+          sudo test -f /var/lib/linuxmuster-radius/instances/ci.yaml
+          sudo test -f /var/lib/linuxmuster-radius/instance.d/ci/clients.conf
+          sudo lmnradius cert issue ci --passphrase ci
+
+          # The instance record is compared FIELD BY FIELD, never by checksum: the record
+          # is written by the software, not by the admin. 7.3.1 legitimately added
+          # `ldap_ca` to the model, so Store.put() adds the key on its first write after
+          # the upgrade, and the postinst's update-all rewrites `image` (and rolls it
+          # back) when the .deb pins a new data-plane digest. What must survive untouched
+          # are the keys the admin passed on the command line. Whoever adds such a key
+          # extends this list in the same PR.
+          cat > record.py <<'PY'
+          import json
+          import sys
+
+          import yaml
+
+          KEYS = [
+              "name", "realm", "workgroup", "server_fqdn",
+              "ldap_server", "ldap_base_dn", "ldap_bind_dn", "wifi_group",
+              "client_subnets", "ssids",
+              "join_secret", "ldap_bind_secret", "radius_secret",
+          ]
+          with open("/var/lib/linuxmuster-radius/instances/ci.yaml", encoding="utf-8") as fh:
+              record = yaml.safe_load(fh)
+          json.dump({k: record.get(k) for k in KEYS}, sys.stdout, sort_keys=True, indent=2)
+          print()
+          PY
+
+          # Admin-owned files: config.yml (carries the API token), the secrets, the EAP
+          # CA + server cert and the rendered instance.d configs.
+          sudo bash -c 'find /etc/linuxmuster-radius/config.yml /etc/linuxmuster-radius/secrets \
+                             /etc/linuxmuster-radius/certs /var/lib/linuxmuster-radius/instance.d \
+                             -type f | sort | xargs sha256sum' > before.sha256
+          sudo find /etc/linuxmuster-radius /var/lib/linuxmuster-radius/instance.d \
+               -printf '%m %U:%G %p\n' | sort > before.perms
+          sudo /opt/linuxmuster-radius/venv/bin/python record.py > before.record
+          cat before.sha256 before.perms before.record
+          before_pid="$(systemctl show -p MainPID --value linuxmuster-radius.service)"
+
+          # ---------------------------------------------------------------- the upgrade
+          # --reinstall --allow-downgrades: on main the build is often version-equal to
+          # the release, and a plain install would report "already the newest version"
+          # and test nothing. With it dpkg unpacks over the installed version and sets
+          # $2 in the postinst, so the upgrade branches really run.
+          sudo apt-get install -y --reinstall --allow-downgrades ./packages/*.deb 2>&1 | tee upgrade.log
+
+          # The upgrade path really ran and did not silently no-op. Two independent
+          # proofs: dpkg unpacked OVER the installed version, and the service was
+          # restarted -- prerm deliberately leaves it running on upgrade, and the only
+          # thing that restarts it is `systemctl try-restart` inside the postinst's
+          # `if [ -n "${2:-}" ]` branch, which exists only when dpkg passes an old version.
+          grep -qE 'Unpacking linuxmuster-radius \([^)]+\) over \([^)]+\)' upgrade.log
+          after_pid="$(systemctl show -p MainPID --value linuxmuster-radius.service)"
+          echo "postinst upgrade branch ran: MainPID $before_pid -> $after_pid"
+          test "$before_pid" != "$after_pid"
+
+          # ---------------------------------------------------------------- state AFTER
+          for _ in $(seq 1 30); do sudo lmnradius health >/dev/null 2>&1 && break; sleep 1; done
+          sudo lmnradius health
+
+          # config.yml, secrets, certs and instance.d byte-identical.
+          sudo sha256sum -c before.sha256
+          # Permissions and ownership unchanged (secrets/ and certs/ 0700, the secrets
+          # and every private key 0600, everything lmnradius:lmnradius).
+          sudo find /etc/linuxmuster-radius /var/lib/linuxmuster-radius/instance.d \
+               -printf '%m %U:%G %p\n' | sort > after.perms
+          diff -u before.perms after.perms
+          # The instance record, field by field.
+          sudo /opt/linuxmuster-radius/venv/bin/python record.py > after.record
+          diff -u before.record after.record
+
+          # The service survived enabled and running.
+          test "$(systemctl is-enabled linuxmuster-radius.service)" = enabled
+          test "$(systemctl is-active linuxmuster-radius.service)" = active
+
+          # One version source: the venv metadata equals the dpkg version (~rc -> rc).
+          ver="$(dpkg-query -W -f='${Version}' linuxmuster-radius)"
+          pep="${ver//\~/}"
+          test "$(sudo /opt/linuxmuster-radius/venv/bin/python -c 'from importlib.metadata import version; print(version("lmnradius"))')" = "$pep"
+
+          # No leftovers of the old version under /opt: nothing dpkg does not own, only
+          # the new lmnradius dist-info, only cpython-312 bytecode, nothing world-writable.
+          dpkg -L linuxmuster-radius | grep '^/opt' | sort > opt-from-dpkg.txt
+          sudo find /opt/linuxmuster-radius | sort > opt-on-disk.txt
+          comm -13 opt-from-dpkg.txt opt-on-disk.txt > opt-leftovers.txt
+          cat opt-leftovers.txt
+          test ! -s opt-leftovers.txt
+          test "$(sudo find /opt/linuxmuster-radius -name 'lmnradius-*.dist-info' -printf '%f\n' | sort -u)" = "lmnradius-$pep.dist-info"
+          test -z "$(sudo find /opt/linuxmuster-radius -name '*.pyc' ! -name '*.cpython-312.pyc' -print -quit)"
+          test "$(sudo find /opt/linuxmuster-radius -perm -0002 | wc -l)" = 0
+
+          # dpkg/apt consistent. dpkg --verify is only a real check with md5sums; up to
+          # 7.3.0 the package shipped none, so assert they are there before trusting it.
+          test -z "$(dpkg --audit)"
+          sudo apt-get -f install -s | grep -q '0 newly installed'
+          test -s /var/lib/dpkg/info/linuxmuster-radius.md5sums
+          test -z "$(sudo dpkg --verify linuxmuster-radius)"
+      - name: Journal of the control plane (always, for the record)
+        if: always() && steps.prev.outputs.skip != '1'
+        run: sudo journalctl -u linuxmuster-radius.service --no-pager | tail -60 || true
+
   release:
-    needs: [gate, build, install-smoke]
+    needs: [gate, build, install-smoke, upgrade-smoke]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
