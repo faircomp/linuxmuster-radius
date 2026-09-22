@@ -198,6 +198,11 @@ jobs:
           sudo test -f /var/lib/linuxmuster-radius/instance.d/ci/clients.conf
           sudo "$old_cli" cert issue ci --passphrase ci
 
+          # Every python below runs with -P: this job checks the repository out, so
+          # without it the working directory lands on sys.path and a module could be
+          # imported from the SOURCE tree instead of from the installed package -- which
+          # would make the version and DEFAULT_IMAGE assertions test the checkout, not
+          # the upgrade.
           # The instance record is compared FIELD BY FIELD, never by checksum: the record
           # is written by the software, not by the admin. 7.3.1 legitimately added
           # `ldap_ca` to the model, so Store.put() adds the key on its first write after
@@ -238,7 +243,7 @@ jobs:
           grep -q ' /etc/linuxmuster-radius/config.yml$' before.sha256
           sudo find /etc/linuxmuster-radius /var/lib/linuxmuster-radius/instance.d \
                -printf '%m %U:%G %p\n' | sort > before.perms
-          sudo /opt/linuxmuster-radius/venv/bin/python record.py > before.record
+          sudo /opt/linuxmuster-radius/venv/bin/python -P record.py > before.record
           sudo cp /var/lib/linuxmuster-radius/instances/ci.yaml before-raw.yaml
           cat before.sha256 before.perms before.record
           before_pid="$(systemctl show -p MainPID --value linuxmuster-radius.service)"
@@ -281,7 +286,7 @@ jobs:
                -printf '%m %U:%G %p\n' | sort > after.perms
           diff -u before.perms after.perms
           # The instance record, field by field.
-          sudo /opt/linuxmuster-radius/venv/bin/python record.py > after.record
+          sudo /opt/linuxmuster-radius/venv/bin/python -P record.py > after.record
           diff -u before.record after.record
           # Not an assertion, a record: what the software itself rewrote in the instance
           # file. 7.3.1 added `ldap_ca` and update-all rewrites `image` (and rolls it
@@ -293,7 +298,7 @@ jobs:
 
           # The fixture image must not be this package's default -- see above: otherwise
           # update-all skips the instance and the upgrade path is never exercised.
-          test "$fixture_image" != "$(sudo /opt/linuxmuster-radius/venv/bin/python -c 'from lmnradius.models import DEFAULT_IMAGE; print(DEFAULT_IMAGE)')"
+          test "$fixture_image" != "$(sudo /opt/linuxmuster-radius/venv/bin/python -P -c 'from lmnradius.models import DEFAULT_IMAGE; print(DEFAULT_IMAGE)')"
 
           # The service survived enabled and running, and the CLI is on PATH.
           test "$(systemctl is-enabled linuxmuster-radius.service)" = enabled
@@ -303,7 +308,7 @@ jobs:
           # One version source: the venv metadata equals the dpkg version (~rc -> rc).
           ver="$(dpkg-query -W -f='${Version}' linuxmuster-radius)"
           pep="${ver//\~/}"
-          test "$(sudo /opt/linuxmuster-radius/venv/bin/python -c 'from importlib.metadata import version; print(version("lmnradius"))')" = "$pep"
+          test "$(sudo /opt/linuxmuster-radius/venv/bin/python -P -c 'from importlib.metadata import version; print(version("lmnradius"))')" = "$pep"
 
           # No leftovers of the old version under /opt: nothing dpkg does not own, only
           # the new lmnradius dist-info, only cpython-312 bytecode, nothing world-writable.
