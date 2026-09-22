@@ -189,14 +189,20 @@ Punkte sind Vorbedingungen, keine Optionen:
   erreichbar sein. **Woher der A-Record kommt:** der Join läuft mit `--no-dns-updates`
   (bis 7.3.0 registrierte `net ads join` die **Docker-Bridge-Adresse** `172.17.0.x` des
   Containers als A-Record — unerreichbar für alles, was den RADIUS-Namen über das AD-DNS
-  auflöst). Stattdessen registriert der Container **bei jedem Start** mit dem
-  Maschinenkonto (`net ads dns register -P`) die **LAN-Adresse der RADIUS-VM**, die die
-  Control Plane als `HOST_IP` übergibt (automatisch: die Adresse, über die der DC
-  erreicht wird, sonst das Default-Route-Interface; fest per `host_ip:` in
-  `config.yml`). Ein Host, der beim Upgrade von 7.3.0 noch den Bridge-Record trägt,
-  korrigiert ihn damit selbst. Auf dem devices.csv-Weg legt `linuxmuster-import-devices`
-  den Record an; kann das Maschinenkonto ihn nicht überschreiben, bleibt es bei einer
-  `WARN`-Zeile im Container-Log (Record dann von Hand prüfen: `host <fqdn>` auf dem DC).
+  auflöst). Stattdessen registriert der Container **bei jedem Start** die **LAN-Adresse
+  der RADIUS-VM**, die die Control Plane als `HOST_IP` übergibt (automatisch: die
+  Adresse, über die der DC erreicht wird, sonst das Default-Route-Interface; fest per
+  `host_ip:` in `config.yml`). Zuerst mit dem Maschinenkonto (`net ads dns register
+  -P`); scheitert das, mit dem **Join-Konto** (`-A`, dieselbe Authfile wie der Join).
+  Der Fallback ist nötig, weil ein bereits vorhandener DNS-Knoten einem anderen Konto
+  gehören kann — nach einem `lmnradius rm` bleibt der Knoten als Tombstone des
+  gelöschten Maschinenkontos zurück, und eine neu angelegte Instanz gleichen Namens
+  bekommt mit `-P` nur `ERROR_DNS_UPDATE_FAILED` (am echten DC verifiziert, 2026-09-22).
+  Ein Host, der beim Upgrade von 7.3.0 noch den Bridge-Record trägt, korrigiert ihn
+  damit selbst. Auf dem devices.csv-Weg legt `linuxmuster-import-devices` den Record an;
+  das Join-Konto darf ihn überschreiben (Wert ist dieselbe Host-Adresse). Gelingt beides
+  nicht, bleibt es bei einer `WARN`-Zeile im Container-Log (Record dann von Hand prüfen:
+  `host <fqdn>` auf dem DC).
 - **NTP-Skew < 5 min.** Die Uhr der RADIUS-VM muss mit dem DC synchron sein (Kerberos-
   Toleranz), sonst `KRB_AP_ERR_SKEW` beim Join.
 - **Kein Reverse-DNS-Zwang.** Das Image backt `/etc/krb5.conf` mit **`rdns` /

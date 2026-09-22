@@ -20,8 +20,11 @@ linuxmuster-radius (7.3.1) lmn73; urgency=medium
     (172.17.0.x) as the A record of the RADIUS FQDN: the join runs with
     --no-dns-updates and the container registers the host's LAN address (HOST_IP,
     auto-detected, `host_ip:` in config.yml overrides) on every start, so an
-    upgraded host corrects its record by itself. Needs the new image, which
-    update-all applies during the upgrade.
+    upgraded host corrects its record by itself. The registration uses the
+    machine account and falls back to the join credentials when the DNS node
+    belongs to another account -- which is what a re-created instance hits: the
+    tombstoned node of the machine account the previous `rm` deleted. Needs the
+    new image, which update-all applies during the upgrade.
   * `lmnradius rm` now leaves the domain: it removes the DNS A record and deletes
     the computer account (image action `leave`, join credentials), then removes
     the container, the machine-account volume, the rendered config and the

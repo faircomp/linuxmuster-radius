@@ -385,14 +385,22 @@ else
     echo "linuxmuster-radius: domain join completed." >&2
 fi
 
-# ---- DNS: A record of SERVER_FQDN -> HOST_IP, with the machine account (-P) ----
+# ---- DNS: A record of SERVER_FQDN -> HOST_IP ----
 # On every start, so a host that changed its address (or one upgraded from a release
-# whose join registered the bridge IP) converges to the right record. Best-effort: on
-# the devices.csv path the record is owned by linuxmuster-import-devices and the
-# machine account may not be allowed to rewrite it -- then the WARN is informational.
+# whose join registered the bridge IP) converges to the right record.
+# The machine account (-P) first: the common case needs no domain-admin credentials.
+# It fails with ERROR_DNS_UPDATE_FAILED when the dnsNode already exists and belongs to
+# someone else -- notably the tombstoned node a previous `lmnradius rm` left behind,
+# owned by the machine account that was deleted with it, which made a re-created
+# instance lose its A record (verified on a real DC, 2026-09-22: -P failed, -A with the
+# join credentials succeeded on the same node). So fall back to the same join
+# credentials the join itself used; on the devices.csv path they may rewrite the
+# imported record too, which is correct -- the value written is this host's address.
 if [ -n "${HOST_IP}" ]; then
     if timeout 60 net ads dns register --configfile="${SMB_CONF}" -P "${SERVER_FQDN}" "${HOST_IP}" >&2; then
-        echo "linuxmuster-radius: DNS A record ${SERVER_FQDN} -> ${HOST_IP} registered." >&2
+        echo "linuxmuster-radius: DNS A record ${SERVER_FQDN} -> ${HOST_IP} registered (machine account)." >&2
+    elif timeout 60 net ads dns register --configfile="${SMB_CONF}" -A "${JOIN_AUTH_FILE}" "${SERVER_FQDN}" "${HOST_IP}" >&2; then
+        echo "linuxmuster-radius: DNS A record ${SERVER_FQDN} -> ${HOST_IP} registered (join credentials; the machine account was not allowed to write the record)." >&2
     else
         echo "WARN: could not register the DNS A record ${SERVER_FQDN} -> ${HOST_IP}; make sure it exists on the DC (devices.csv + linuxmuster-import-devices)." >&2
     fi
