@@ -88,7 +88,7 @@ def is_ldaps(url: str) -> bool:
 # published to GHCR by the build-image workflow (verified end-to-end against a real DC);
 # Renovate keeps it current (same rationale as linuxmuster-squid). The image validator
 # requires an explicit :tag or @sha256 and rejects a bare repo either way.
-DEFAULT_IMAGE = "ghcr.io/faircomp/linuxmuster-radius@sha256:2dd07e23e01b7f97614164266c68c60f96c2fcc0feac4cb1c2adf0a2ba7ad894"
+DEFAULT_IMAGE = "ghcr.io/faircomp/linuxmuster-radius@sha256:54158595d89b095ef752166c0f843af83e6c733a546ae7863b460c3ca46aaf96"
 
 
 class SSID(BaseModel):
