@@ -154,10 +154,13 @@ jobs:
         id: prev
         env:
           GH_TOKEN: ${{ github.token }}
+          # Through env, never interpolated into the script: a ${{ }} expression in a run
+          # block is substituted before the shell sees it, so its content could inject code.
+          PREV_TAG: ${{ github.event.inputs.prev_tag }}
         run: |
           set -eu
           mkdir -p previous
-          tag="${{ github.event.inputs.prev_tag }}"
+          tag="${PREV_TAG:-}"
           if [ -z "$tag" ]; then
             # Prefer the newest real release; fall back to the newest prerelease. Skipping is
             # only legitimate when the repo has NO release at all: this job gates the release
