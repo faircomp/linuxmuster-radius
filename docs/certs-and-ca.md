@@ -56,7 +56,9 @@ lmnradius ca init
 ```
 
 - **Passphrase:** Der Befehl fragt eine **Passphrase** ab und legt den privaten Root-Key
-  **passphrase-verschlüsselt** ab. Ohne Passphrase kein `cert issue`.
+  **passphrase-verschlüsselt** ab. Ohne Passphrase kein `cert issue`. Für Skripte gibt es
+  `--passphrase '<wert>'` (bei `ca init` und `cert issue`) — dann steht die Passphrase
+  aber in Shell-History und Prozessliste; interaktiv immer den Prompt nehmen.
 - **Ablage:** `certs_dir/ca/` (Default `certs_dir` = `/etc/linuxmuster-radius/certs`; Verzeichnis
   `0700`, Eigentümer `lmnradius`). Es entstehen `ca.cert.pem` (öffentliches CA-Zertifikat,
   `0644`, wird verteilt) und `ca.key.pem` (privater Root-Key, `0600`, passphrase-verschlüsselt,
@@ -99,7 +101,9 @@ lmnradius cert issue <instance> [--fqdn radius.<schule>.<tld>]
   - **Laufzeit mehrjährig** (kein 90-Tage-Zwang, weil es eine private CA ist).
 - **Ablage & Mount:** Das Paar landet in `certs_dir/<name>/` (privater Key `0600`) und wird
   **read-only** nach `/run/secrets/eap/*` in den Container gemountet, wo das FreeRADIUS-
-  `eap`-Modul es als Server-Identität lädt.
+  `eap`-Modul es als Server-Identität lädt. Im selben Verzeichnis liegt seit 7.3.1 auch
+  `ldap-ca.pem` — **nicht** Teil der EAP-CA, sondern die gepinnte **DC-CA** für die
+  LDAPS-Prüfung (`--ldap-ca`, siehe [`radius-and-ad.md`](radius-and-ad.md) § 3).
 - **Aktivierung:** Nach dem Ausstellen die Instanz abgleichen bzw. neu starten:
 
   ```bash

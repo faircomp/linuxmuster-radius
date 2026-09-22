@@ -68,7 +68,9 @@ git-versioniert verwaltet über **REST-API + Typer-CLI**.
 - **UniFi:** die **Access Points** sind der NAS und senden Access-Requests aus
   **ihrer eigenen IP** (der Controller ist **kein** Proxy). `clients.conf` nutzt
   daher das AP-Management-**Subnetz** als CIDR und unterstützt **mehrere**
-  Subnetze (`--client-subnet`, wiederholbar).
+  Subnetze (`--client-subnet`, wiederholbar; `127.0.0.0/8` ist für den Healthcheck-
+  Client des Images reserviert und wird abgelehnt — lokale Tests gehen gegen die
+  LAN-IP der VM).
 - **Control Plane:** gehärteter systemd-Dienst mit **REST-API** (FastAPI) und
   **CLI** (Typer, Thin Client, **kein** direkter Docker-Zugriff) — legt Instanzen
   an, pflegt SSID-/Policy-Config, verwaltet die **dedizierte EAP-CA**
@@ -117,6 +119,10 @@ auf **crabbox**. Aggregator: `bash scripts/tests/run.sh [lint|unit|quick|e2e|all
   `tecnativa/docker-socket-proxy`. Jeder extern gelieferte String wird an der
   pydantic-Grenze streng validiert (er fließt in Dateinamen, Container-Namen,
   Mounts und gerenderte Config).
+- **Die LDAPS-Verbindung zum DC wird geprüft.** Rollen-Gate und VLAN kommen aus der
+  `rlm_ldap`-Gruppenabfrage; deshalb pinnt jede Instanz die CA des DC-Zertifikats
+  (`--ldap-ca /etc/linuxmuster/ssl/cacert.pem`, Pflicht seit 7.3.1; Altbestand:
+  `lmnradius set-ldap-ca`, bis dahin warnt `lmnradius list` mit „LDAPS unverified").
 - **Sophomorix bleibt unangetastet.** Nutzer, die `wifi`-Gruppe, Rollengruppen
   und Bind-User werden **nie** von Hand angelegt — RADIUS **konsumiert** sie nur.
   Der RADIUS-Server wird als **Gerät** (role `server`) in `devices.csv`

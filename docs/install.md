@@ -43,13 +43,15 @@ curl -fsSL https://get.docker.com | sh                      # Docker
 # neueste Release-Version (Tag v7.3.N) von GitHub holen — oder VER=7.3.N von Hand setzen
 VER=$(curl -fsSL https://api.github.com/repos/faircomp/linuxmuster-radius/releases/latest \
       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+: "${VER:?konnte die neueste Version nicht von der GitHub-API lesen - VER=7.3.N von Hand setzen}"
 curl -fsSLo lmnradius.deb \
   https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_all.deb
 sudo apt install -y ./lmnradius.deb
 lmnradius health                                            # {"status":"ok"}
 ```
 Der `postinst` legt den System-User `lmnradius`, `/etc/linuxmuster-radius/{config.yml (0600,
-zufälliges Token),secrets,certs}`, das git-initialisierte State-Verzeichnis an und startet den
+zufälliges Token),secrets,certs}` und das State-Verzeichnis als Git-Repo an (jede Instanz-
+Änderung ein Commit, `git -C /var/lib/linuxmuster-radius/instances log`) und startet den
 Dienst. Das Image (`ghcr.io/faircomp/linuxmuster-radius`, **public**) wird bei `reconcile`
 gezogen.
 *(Optionale Härtung: `deploy/docker-socket-proxy.yml` starten und `docker_host: "tcp://127.0.0.1:2375"` in `config.yml` setzen.)*
@@ -59,6 +61,7 @@ Die beiden Helferskripte direkt aus dem Release laden (auf dem DC gibt es kein R
 ```bash
 VER=$(curl -fsSL https://api.github.com/repos/faircomp/linuxmuster-radius/releases/latest \
       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')   # dieselbe Version wie in Schritt 1
+: "${VER:?konnte die neueste Version nicht von der GitHub-API lesen - VER=7.3.N von Hand setzen}"
 BASE=https://raw.githubusercontent.com/faircomp/linuxmuster-radius/v${VER}/scripts
 curl -fsSLO ${BASE}/discover-ad-facts.sh
 curl -fsSLO ${BASE}/provision-radius-account.sh
@@ -68,7 +71,8 @@ sudo bash provision-radius-account.sh radius <MAC> <IP>   # <hostname> <mac> <ip
 ```
 `provision-radius-account.sh` **braucht die drei Argumente** (Hostname/MAC/IP der RADIUS-VM),
 trägt sie als Device (Rolle `server`) in die `devices.csv` ein, fragt interaktiv das
-Join-Konto und das AP-Shared-Secret ab und legt die drei Secret-Dateien unter
+Join-Konto und das AP-Shared-Secret ab und legt die drei Secret-Dateien plus die
+linuxmuster-CA (`ldap-ca.pem`, für die LDAPS-Prüfung in Schritt 5) unter
 `./radius-secrets/` an — es zeigt dabei **nie** ein Secret an. Es arbeitet bewusst
 vorsichtig: Backup der `devices.csv` vor jedem Anhängen, idempotent (vorhandener Host wird
 übersprungen), und mit `DRY_RUN=1` zeigt es die Zeile nur an, ohne zu schreiben.
@@ -82,7 +86,7 @@ vorsichtig: Backup der `devices.csv` vor jedem Anhängen, idempotent (vorhandene
 > **Nutzer/Gruppen/`wifi`/`global-binduser` bleiben reine Sophomorix-Welt** — nichts von Hand anlegen.
 
 ## 3. Secrets auf die RADIUS-VM übertragen (`/etc/linuxmuster-radius/secrets/`)
-Die drei Dateien aus Schritt 2 (Namen **unverändert lassen** — sie sind die
+Die Dateien aus Schritt 2 (Namen **unverändert lassen** — sie sind die
 `--…-secret`-Referenzen in Schritt 5):
 
 | Datei | Inhalt |
@@ -90,6 +94,7 @@ Die drei Dateien aus Schritt 2 (Namen **unverändert lassen** — sie sind die
 | `join.authfile` | Domänen-Beitritts-Authfile (samba `-A`) — **Administrator- bzw. delegiertes Konto** (ein einfacher Benutzer kann nicht joinen, verifiziert) |
 | `ldap-bind.secret` | das `global-binduser`-Passwort (kopiert das Skript automatisch vom DC) |
 | `radius.secret` | das WLAN-Shared-Secret (identisch zum UniFi-RADIUS-Profil, Schritt 6) |
+| `ldap-ca.pem` | die linuxmuster-CA `/etc/linuxmuster/ssl/cacert.pem` (kein Secret; sie signiert das LDAPS-Zertifikat des DC und wird in Schritt 5 mit `--ldap-ca` gepinnt) |
 
 ```bash
 # auf dem DC: übertragen, Besitz/Rechte setzen, Kopie auf dem DC löschen
@@ -137,6 +142,7 @@ sudo lmnradius create --name meineschule \
   --ldap-server ldaps://dc.linuxmuster.lan \
   --ldap-base-dn OU=SCHOOLS,DC=linuxmuster,DC=lan \
   --ldap-bind-dn CN=global-binduser,OU=Management,OU=GLOBAL,DC=linuxmuster,DC=lan \
+  --ldap-ca /etc/linuxmuster-radius/secrets/ldap-ca.pem \
   --client-subnet 10.0.0.0/16 \
   --ssid lehrer-wlan:role-teacher:20 \
   --ssid schueler-wlan:role-student:10 \
@@ -144,9 +150,28 @@ sudo lmnradius create --name meineschule \
 
 sudo lmnradius cert issue meineschule         # Server-Cert (serverAuth + eapOverLAN, SAN=FQDN)
 sudo lmnradius reconcile                       # Container starten/abgleichen
-sudo lmnradius status meineschule              # exists/running/health
+sudo lmnradius status meineschule              # exists/running/health/crash_looping
 sudo lmnradius logs meineschule --tail 60
 ```
+
+> **`--ldap-ca` ist Pflicht** (seit 7.3.1): über die LDAPS-Verbindung zum DC laufen das
+> Rollen-Gate und die VLAN-Zuweisung; ohne Prüfung des DC-Zertifikats könnte ein Angreifer
+> zwischen RADIUS-VM und DC die Gruppenabfrage fälschen. Die API lehnt `ldaps://` ohne CA ab.
+> Die CA ist auf dem linuxmuster-Server `/etc/linuxmuster/ssl/cacert.pem` (Schritt 2 legt sie
+> als `ldap-ca.pem` bei). Kommst du nicht an die Datei, ist **`--ldap-ca-tofu`** die
+> dokumentierte Alternative: die CLI holt die Zertifikatskette per `openssl s_client`, druckt
+> die SHA-256-Fingerprints und pinnt sie („trust on first use") — den Fingerprint danach auf
+> dem DC gegenprüfen (`openssl x509 -in /etc/linuxmuster/ssl/cacert.pem -noout -fingerprint
+> -sha256`). Liefert der DC nur sein eigenes Zertifikat (linuxmuster tut das), wird genau
+> dieses gepinnt; nach einer Erneuerung des DC-Zertifikats scheitert die Prüfung dann
+> fail-closed, bis `lmnradius set-ldap-ca` neu pinnt. Details:
+> [`radius-and-ad.md`](radius-and-ad.md) § 3.
+
+> **`--client-subnet`:** nur die AP-Management-Subnetze. `127.0.0.0/8` (und jedes CIDR, das
+> `127.0.0.1` enthält) wird abgelehnt — die Adresse ist für den Healthcheck-Client des Images
+> reserviert und ein solcher Client ließ die Instanz bis 7.3.0 crash-loopen. Für einen Test
+> von der VM selbst `eapol_test` gegen die **LAN-IP** der VM richten (Schritt 8); Pakete vom
+> Host kommen im Container ohnehin von der Docker-Bridge, nie von loopback.
 
 > **Erwartetes Verhalten beim allerersten `create`:** es speichert die Instanz **und
 > versucht sofort zu starten** — das Zertifikat aus der nächsten Zeile existiert da noch
@@ -178,6 +203,31 @@ Erwartung: Lehrer @ Lehrer-SSID → online in VLAN 20 · Schüler @ Lehrer-SSID 
 Schüler @ Schüler-SSID → online in VLAN 10 · falsches Passwort → abgewiesen · Gerät ohne die
 gepinnte CA → abgewiesen.
 
+**Ohne echten Client — `eapol_test` von einem Rechner im AP-Subnetz (oder von der RADIUS-VM
+selbst gegen ihre LAN-IP).** Ubuntu liefert es im Paket `eapoltest` (universe):
+```bash
+sudo apt install -y eapoltest
+sudo lmnradius ca export --out /root/eap-ca.pem
+cat > /root/peap-lehrer.conf <<'EOF'
+network={
+  key_mgmt=WPA-EAP
+  eap=PEAP
+  identity="lehrer1"
+  password="geheim"
+  phase2="auth=MSCHAPV2"
+  ca_cert="/root/eap-ca.pem"                        # die EAP-Root pinnen ...
+  domain_suffix_match="radius.linuxmuster.lan"      # ... und den Servernamen (wie die Clients)
+}
+EOF
+eapol_test -c /root/peap-lehrer.conf -a <RADIUS-LAN-IP> -p 1812 \
+  -s "$(sudo cat /etc/linuxmuster-radius/secrets/radius.secret)" \
+  -N30:s:00-11-22-33-44-55:lehrer-wlan -t 12          # -N30 = Called-Station-Id "<AP-MAC>:<SSID>"
+```
+`SUCCESS` = Access-Accept; im Dump zeigen die Attribute 64/65/81 das VLAN
+(`Tunnel-Private-Group-Id` als Hex-ASCII, `3230` = „20"). Access-Reject erscheint als
+`code=3`/`FAILURE`. Die SSID kommt **nur** über `-N30` — so prüfst du dieselben Konten
+gegen jede SSID. Ubuntus Build kennt kein `-d` (die Ausgabe ist ohne bereits vollständig).
+
 > Diese Matrix lief gegen einen echten DC bereits **7/7 durch** — mit genau den
 > `role-teacher`/`role-student`-Gates aus Schritt 5 und den zurückgelieferten VLANs 20/10.
 > Hier prüfst du also nicht die Mechanik, sondern **deine** Werte: Gruppennamen,
@@ -187,6 +237,21 @@ gepinnte CA → abgewiesen.
 ```bash
 sudo apt upgrade                               # neues .deb -> postinst: try-restart + 'lmnradius update-all'
 ```
+
+> **Upgrade von 7.3.0 oder älter — ein Pflichtschritt:** Instanzen aus diesen Versionen
+> prüfen das DC-Zertifikat der LDAPS-Verbindung **nicht** (Sicherheitsbefund, siehe
+> Schritt 5). Sie laufen nach dem Upgrade unverändert weiter, aber `lmnradius list` und
+> `lmnradius health` warnen mit **„LDAPS unverified"**, bis die CA gepinnt ist:
+> ```bash
+> scp root@<dc>:/etc/linuxmuster/ssl/cacert.pem /root/ldap-ca.pem
+> sudo lmnradius set-ldap-ca meineschule --ldap-ca /root/ldap-ca.pem   # oder --ldap-ca-tofu
+> sudo lmnradius list                                                   # Warnung weg
+> ```
+> Der Befehl pinnt die CA und startet den Container mit Prüfung neu (kurze Unterbrechung).
+> Das Upgrade selbst hebt die Instanz per `update-all` auf das neue Image, das den
+> A-Record des RADIUS-FQDN auf die LAN-IP der VM korrigiert (bis 7.3.0 stand dort die
+> Docker-Bridge-Adresse) und die Instanz-Historie (`git log` im State-Verzeichnis)
+> repariert.
 `update-all` hebt **jede Instanz auf das im `.deb` gepinnte Image**, pro Instanz mit Health-Check und
 **automatischem Rollback**. Neue Images kommen via **Renovate**: ein neues GHCR-Image → Renovate
 öffnet einen **Digest-Bump-PR** (`DEFAULT_IMAGE`), ein Mensch merged → neuer `v*`-Tag → neues `.deb`

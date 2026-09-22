@@ -73,7 +73,9 @@ die Entscheidungen mit Begründung und verworfenen Alternativen: `docs/decisions
   `copy_request_to_tunnel` interne Attribute nicht überträgt (ADR-007); darauf wird verzweigt.
 - **Per-SSID-Gruppen-Gate:** je SSID eine Zielgruppe, geprüft über `rlm_ldap`
   (Bind als `global-binduser`; dessen LDAP-TLS terminiert ein lokales **stunnel** zum DC,
-  ADR-015). Geprüft wird die **direkte** Mitgliedschaft (`memberOf`), **nicht** rekursiv —
+  ADR-015, das das DC-Zertifikat gegen die gepinnte CA `ldap_ca` prüft — Pflicht seit
+  7.3.1, [`radius-and-ad.md`](radius-and-ad.md) § 3). Geprüft wird die **direkte**
+  Mitgliedschaft (`memberOf`), **nicht** rekursiv —
   darum schulübergreifend `role-teacher`/`role-student` (direkt zugewiesen) und **nicht** die
   verschachtelten `all-*`-Aggregate; alternativ pro Schule `<schule>-lehrer` →
   `<schule>-teachers`. Sonst Access-Reject. `ntlm_auth --require-membership-of` allein reicht
@@ -104,8 +106,11 @@ die Entscheidungen mit Begründung und verworfenen Alternativen: `docs/decisions
   Token in `config.yml` (`chmod 600`); **Audit-Log** jeder Mutation. **Strikte
   pydantic-v2-Boundary-Validierung** jedes extern gelieferten Strings — er fließt in
   Dateinamen/Container-Namen/Mounts/gerenderte Config.
-- **Reconciler:** deklarativer, **git-versionierter** State (`instances/*.yaml`) →
-  rendert Config, gleicht Ist gegen Soll ab (docker-py).
+- **Reconciler:** deklarativer, **git-versionierter** State (`instances/*.yaml`, jede
+  Änderung ein Commit) → rendert Config, gleicht Ist gegen Soll ab (docker-py) und
+  meldet den **ehrlichen** Container-Zustand (ein crash-loopender Container ist
+  `crash_looping`, nicht „running"). `rm` verlässt die Domäne (Image-Aktion `leave`)
+  und entfernt Container, Volume, Config und Datensatz.
 - **Updater:** Pull-by-**Digest** (`image@sha256:`), **health-gated**, **Auto-Rollback**
   auf den letzten Known-Good; Renovate (`docker:pinDigests`, `automerge:false`) +
   CI-Publish. Kein Watchtower.
@@ -140,6 +145,7 @@ ssids:                                           # SSIDs = Config, NICHT je ein 
   # pro Schule stattdessen: allowed_group "<schule>-teachers" / "<schule>-students"
 server_fqdn:   radius.linuxmuster.lan            # SAN des EAP-Server-Zerts
 join_secret:   <secret-ref>                      # Secret-Referenz für den Domänen-Join
+ldap_ca:       ldap-ca.pem                       # gepinnte DC-CA unter certs/<name>/ (null = unverifiziert, nur Altbestand)
 image:         ghcr.io/faircomp/linuxmuster-radius@sha256:<digest>   # optional, sonst DEFAULT_IMAGE
 ```
 
@@ -147,7 +153,9 @@ image:         ghcr.io/faircomp/linuxmuster-radius@sha256:<digest>   # optional,
 
 - **Skalare** (`realm`, `workgroup`, `server_fqdn`, `ldap_base_dn`, `ldap_bind_dn`, …)
   gehen als **Whitelist-Env** in den Container; der **`envsubst`-Entrypoint** rendert
-  daraus die Templates (`smb.conf`, `mods-enabled/ldap`, `eap`).
+  daraus die Templates (`smb.conf`, `mods-enabled/ldap`, `eap`). Dazu `HOST_IP` (die
+  LAN-Adresse der VM, die der Container als A-Record von `server_fqdn` registriert) und
+  `LDAP_CA` (Pfad der gemounteten DC-CA).
 - **Listen** sind mit `envsubst` nicht ausdrückbar → die **Control Plane** rendert
   sie in eine gemountete, read-only **`conf.d/`**: `client_subnets` → `clients.conf`,
   `ssids[]` → die **per-SSID `unlang`/virtual-server-Branches**.

@@ -241,9 +241,12 @@ und radiusd **segfaultet** Sekunden nach „Ready to process requests" (die Stoc
 loopback-only im Netzwerk-Namespace des Containers; die Wire-Verschlüsselung zum DC bleibt
 erhalten. **Verworfene Alternativen:** (a) `libldap` gegen OpenSSL neu bauen — eigenes
 Paket pflegen; (b) GSSAPI-Bind über Klartext — Kerberos-ccache-Lebenszyklus; (c) `rlm_ldap`
-weglassen — das Per-SSID-Rollen-Gate braucht die AD-Gruppen. Optional verifiziert stunnel
-das DC-Zertifikat gegen eine gemountete CA (`LDAP_CA`). **Quelle:** FreeRADIUS-Wiki
-„Rlm_ldap" (GnuTLS-vs-OpenSSL-Warnung); reproduziert + behoben im Live-E2E (references.md).
+weglassen — das Per-SSID-Rollen-Gate braucht die AD-Gruppen. stunnel verifiziert das
+DC-Zertifikat gegen die gemountete CA (`LDAP_CA`) — **seit 7.3.1 für neue Instanzen
+Pflicht** (`--ldap-ca`/`--ldap-ca-tofu`, Kampagnen-Befund 8.5: bis 7.3.0 setzte die
+Control Plane `LDAP_CA` nie, die Verbindung war unverifiziert; Details in
+radius-and-ad.md § 3 und threat-model.md). **Quelle:** FreeRADIUS-Wiki „Rlm_ldap"
+(GnuTLS-vs-OpenSSL-Warnung); reproduziert + behoben im Live-E2E (references.md).
 
 ---
 
