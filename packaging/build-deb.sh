@@ -44,6 +44,16 @@ for f in postinst prerm postrm; do
     chmod 0755 "$STAGE/DEBIAN/$f"
 done
 
+# DEBIAN/md5sums (what dh_md5sums would generate): every shipped regular file, path
+# without the leading "./", DEBIAN/ itself excluded. Without it the .deb carries no
+# integrity data -- lintian: no-md5sums-control-file, and `dpkg --verify` only sees the
+# sums dpkg computed itself at unpack time (found in the 2026-09-22 campaign).
+echo "== md5sums =="
+( cd "$STAGE" && find . -type f -not -path './DEBIAN/*' -printf '%P\n' | LC_ALL=C sort \
+    | xargs -r -d '\n' md5sum > DEBIAN/md5sums )
+chmod 0644 "$STAGE/DEBIAN/md5sums"
+echo "   $(wc -l < "$STAGE/DEBIAN/md5sums") files"
+
 OUT="$ROOT/linuxmuster-radius_${VERSION}_all.deb"
 echo "== dpkg-deb -> $OUT =="
 dpkg-deb --build --root-owner-group "$STAGE" "$OUT"
