@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from lmnradius.docker_service import DockerService, detect_host_ip, state_view
+from lmnradius.docker_service import DockerService, detect_host_ip, pick_error_line, state_view
 from lmnradius.models import Instance
 
 
@@ -109,3 +109,21 @@ def test_mounts_fail_closed_on_missing_ldap_ca(
     with pytest.raises(FileNotFoundError, match="EAP cert material missing"):
         service._mounts(pinned, env, require_eap=True)
     assert str(certs / "server.pem") in service._mounts(pinned, env, require_eap=False)
+
+
+def test_pick_error_line_prefers_fatal_over_later_noise() -> None:
+    # Real shape (lab, wrong DC CA): FATAL, then the radiusd -XC dump, then the next
+    # start's chatter -- the FATAL line must win even though it is not last.
+    lines = [
+        "linuxmuster-radius: LDAPS ... verified against the CA in LDAP_CA (chain + host name).",
+        "2026.09.22 13:03:55 LOG3[0]: SSL_connect: certificate verify failed",
+        "Error: rlm_ldap (ldap): Bind with CN=global-binduser,... to ldap://127.0.0.1:3890 failed",
+        "FATAL: FreeRADIUS configuration check ('radiusd -XC') failed; details:",
+        *["  radiusd -XC dump line"] * 300,
+        "reopen_one_log: Unable to open new log file '/var/log/samba/log.winbindd': Read-only file system",
+    ]
+    assert pick_error_line(lines).startswith("FATAL: FreeRADIUS configuration check")
+    assert pick_error_line(lines[:3]).startswith("Error: rlm_ldap")
+    assert pick_error_line(lines[:2]).startswith("2026.09.22 13:03:55 LOG3[0]")
+    assert pick_error_line(["just noise"]) == "just noise"
+    assert pick_error_line([]) == "(no log output)"

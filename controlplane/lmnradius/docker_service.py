@@ -533,14 +533,14 @@ class DockerService:
 
         result: dict[str, Any] = {"name": name, "exists": True, **view, "image": image}
         if view["crash_looping"]:
-            # The entrypoint prints the reason as a FATAL line; surface it so the
-            # operator does not have to dig through `docker logs`.
+            # Surface the reason so the operator does not have to dig through
+            # `docker logs`. A wide window: the entrypoint's FATAL line is followed by
+            # the full `radiusd -XC` dump (hundreds of lines) before the restart.
             try:
-                lines = container.logs(tail=40).decode("utf-8", errors="replace").splitlines()
+                lines = container.logs(tail=600).decode("utf-8", errors="replace").splitlines()
             except APIError:
                 lines = []
-            fatal = [line for line in lines if "FATAL" in line]
-            result["last_error"] = (fatal or lines or ["(no log output)"])[-1].strip()
+            result["last_error"] = pick_error_line(lines)
         return result
 
     def logs(
@@ -649,6 +649,16 @@ class DockerService:
                 )
         result["gates"] = gates
         return result
+
+
+def pick_error_line(lines: list[str]) -> str:
+    """The most telling line of a crash-looping container's log: the entrypoint's
+    last FATAL line, else the last radiusd/stunnel error, else the last line."""
+    for marker in ("FATAL", "Error:", "LOG3["):
+        hits = [line for line in lines if marker in line]
+        if hits:
+            return hits[-1].strip()
+    return (lines or ["(no log output)"])[-1].strip()
 
 
 def _tail(data: Any, lines: int = 8) -> str:
