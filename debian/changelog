@@ -1,3 +1,16 @@
+linuxmuster-radius (7.3.2) lmn73; urgency=medium
+
+  * CI gains the upgrade-smoke job: every push and every release now installs
+    the newest published release, creates the secrets, the EAP CA, the server
+    certificate and an instance record on it, upgrades to the freshly built
+    package and fails unless config.yml, the secrets, the certificates and the
+    rendered instance.d configs are byte-identical with unchanged permissions,
+    the instance record keeps every admin-set field, the service stays enabled
+    and running, the venv reports the new version and nothing of the old one is
+    left under /opt.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Tue, 22 Sep 2026 19:20:00 +0200
+
 linuxmuster-radius (7.3.1) lmn73; urgency=medium
 
   * SECURITY: the LDAPS link to the DC is now verified. Up to 7.3.0 the stunnel
