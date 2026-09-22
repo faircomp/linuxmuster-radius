@@ -32,4 +32,4 @@ radius_secret: default-school.radius
 # on records created earlier (then listed as "LDAPS unverified").
 ldap_ca: ldap-ca.pem
 # Digest-pinned in production (Renovate, P5). The 64-hex digest below is illustrative.
-image: ghcr.io/faircomp/linuxmuster-radius@sha256:54158595d89b095ef752166c0f843af83e6c733a546ae7863b460c3ca46aaf96
+image: ghcr.io/faircomp/linuxmuster-radius@sha256:7385d3a64c3d98afa33577473c6b065f2a6a2ef88fa7ff70117ab6262118a77a
