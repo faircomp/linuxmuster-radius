@@ -9,9 +9,9 @@
     "description": "The hash-pinned lockfiles build-deb.sh installs with --require-hashes. Renovate re-runs the command in each header (uv pip compile ... --generate-hashes) inside controlplane/; scripts/check-lockfiles.sh (CI job `lockfile`) proves the result.",
     "managerFilePatterns": ["/^controlplane/(build-)?requirements\\.lock$/"],
     "lockFileMaintenance": {
-      "description": "The only way the Python lockfiles move: the dependencies in pyproject.toml carry no version (Renovate skips them as unspecified-version) and the transitive ones are indirect (disabled by default). Once a week Renovate deletes each lockfile and re-runs its header command, i.e. a fresh resolution with fresh hashes, as ONE reviewable PR. Any time on Monday, because the scheduled workflow starts at 04:00 UTC or later and the default schedule (before 4am on monday) would never match.",
+      "description": "The only way the Python lockfiles move: the dependencies in pyproject.toml carry no version (Renovate skips them as unspecified-version) and the transitive ones are indirect (disabled by default). On every run (the workflow runs weekly) Renovate deletes each lockfile and re-runs its header command, i.e. a fresh resolution with fresh hashes, as ONE reviewable PR. The header's --exclude-newer=P7D keeps releases younger than a week out (minimumReleaseAge cannot: lock maintenance has no package timestamps). The schedule lives in the workflow cron only; the default (before 4am on monday) would never match it.",
       "enabled": true,
-      "schedule": ["* * * * 1"]
+      "schedule": ["at any time"]
     }
   },
   "customManagers": [
@@ -39,10 +39,10 @@
     },
     {
       "customType": "regex",
-      "description": "The Renovate engine itself, pinned as renovate-version: <version>@sha256:<digest> in renovate.yml (the action's default engine is too old for this config).",
+      "description": "The Renovate engine itself, pinned as RENOVATE_VERSION: <version>@sha256:<digest> in renovate.yml (used by the config validator step and by the action; the action's default engine is too old for this config).",
       "managerFilePatterns": ["/^\\.github/workflows/renovate\\.ya?ml$/"],
       "matchStrings": [
-        "renovate-version: (?<currentValue>\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+        "RENOVATE_VERSION: (?<currentValue>\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]{64})"
       ],
       "depNameTemplate": "ghcr.io/renovatebot/renovate",
       "datasourceTemplate": "docker"
@@ -76,6 +76,11 @@
       "matchUpdateTypes": ["digest"],
       "groupName": "lmndev-runner build image",
       "automerge": false
+    },
+    {
+      "description": "PyPI releases (the pinned CI tools) only once they are a week old, the window in which a compromised upload is usually noticed and yanked. PyPI only: ghcr.io gives no release timestamps, so an age rule on Docker would hold those updates forever (the workflow's Thursday cron is their age brake).",
+      "matchDatasources": ["pypi"],
+      "minimumReleaseAge": "7 days"
     },
     {
       "description": "Python lockfiles: every bump is a supply-chain change of the shipped venv; a human merges it after CI (lockfile, fast tier on the new versions, package, install and upgrade smoke) is green.",
