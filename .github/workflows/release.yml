@@ -15,6 +15,7 @@
 #    pulls exactly that image (the digest wins, the tag only tells Renovate which tag's digest
 #    to follow). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
 #    different build than the one that is released.
+#  * Every action by full commit SHA with a `# vN` comment: a tag can be moved, a SHA cannot.
 name: release
 
 on:
@@ -34,7 +35,7 @@ jobs:
       image: ${{ steps.meta.outputs.image }}
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: meta
         run: |
           VERSION=$(dpkg-parsechangelog -S Version)
@@ -57,7 +58,7 @@ jobs:
       image: ${{ needs.gate.outputs.image }}
       options: --user root
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build package (make deb wraps packaging/build-deb.sh)
         run: |
           # No debian/control at the root yet (that is the debian/ conversion PR), so
@@ -65,7 +66,7 @@ jobs:
           apt-get update -qq && apt-get install -y -qq python3-venv
           make deb
           mkdir -p output && mv ./linuxmuster-radius_*.deb output/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages
           path: output/
@@ -75,7 +76,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: packages
           path: packages/
@@ -112,8 +113,9 @@ jobs:
     permissions:
       contents: read        # restrictive org defaults must not break the asset download
     steps:
-      - uses: actions/checkout@v4          # needed for dpkg-parsechangelog and the fixtures
-      - uses: actions/download-artifact@v4
+      # needed for dpkg-parsechangelog and the fixtures
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: packages
           path: packages/
@@ -359,7 +361,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: packages
           path: packages/

@@ -274,9 +274,11 @@ Auflösung). **Quelle:** pip-Doku „Secure installs" (hash-checking mode); Reno
 steht überall als `ghcr.io/linuxmuster/lmndev-runner:<tag>@sha256:<digest>` (ci.yml,
 release.yml und der Build-Befehl im Makefile, derselbe Digest). Renovate schlägt neue
 Digests als PR vor, ein Mensch merged; den Tag ändert Renovate nie (`24.04 → 26.04` wäre
-eine neue linuxmuster-Linie, kein Update). **Begründung:** beide Tags baut eine fremde Org
-wöchentlich neu, der Build läuft darin als root; ein still geändertes Image änderte jedes
-künftige `.deb`. **Verworfene Alternative:** eigenes Build-Image oder `ubuntu:24.04@sha256`
+eine neue linuxmuster-Linie, kein Update). Jede GitHub Action steht per vollständigem
+Commit-SHA mit `# vN`-Kommentar (`helpers:pinGitHubActionDigests`). **Begründung:** beide
+Tags baut eine fremde Org wöchentlich neu, der Build läuft darin als root; ein still
+geändertes Image änderte jedes künftige `.deb`. Ein Action-Tag lässt sich verschieben, ein
+SHA nicht. **Verworfene Alternative:** eigenes Build-Image oder `ubuntu:24.04@sha256`
 mit `apt-get build-dep` (Stufe C im Hub-Plan, setzt den debian/-Umbau voraus).
 **Quelle:** Hub `work/plans/paketarchiv.md` §2.
 

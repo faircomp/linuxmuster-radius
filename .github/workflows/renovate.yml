@@ -12,6 +12,7 @@
 # contents+pull-requests write) if present, else falls back to the built-in
 # GITHUB_TOKEN. A PAT is RECOMMENDED so the CI workflows actually run on Renovate's
 # PRs (PRs created with GITHUB_TOKEN do not trigger other workflows).
+# Every action is pinned by full commit SHA (`# vN` names the tag); Renovate bumps both.
 
 name: Renovate
 
@@ -44,10 +45,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Renovate
-        uses: renovatebot/github-action@v41.0.8
+        uses: renovatebot/github-action@f24426972367551f3391720e34317783a92fd32b # v41.0.8
         with:
           token: ${{ secrets.RENOVATE_TOKEN || github.token }}
         env:
