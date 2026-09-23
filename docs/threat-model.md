@@ -59,7 +59,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   kompromittierte oder brechende Fassung wäre ohne Codeänderung ausgeliefert worden, zwei
   Bauten desselben Tags konnten sich unterscheiden. **Gegenmaßnahme (7.3.3):** das venv
   entsteht nur aus `controlplane/requirements.lock` und `build-requirements.lock` (Version
-  und sha256 je Datei, `--require-hashes --only-binary :all: --no-deps`, eigenes Paket
+  und sha256 je Datei, nur Fassungen, die mindestens eine Woche auf PyPI liegen, `--require-hashes --only-binary :all: --no-deps`, eigenes Paket
   offline), danach `pip check`, und der Bau bricht ab, wenn das venv nicht exakt den
   Lockfiles entspricht; der CI-Job `lockfile` prüft die Lockfiles gegen
   `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per Renovate-PR, den

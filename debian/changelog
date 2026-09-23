@@ -7,8 +7,13 @@ linuxmuster-radius (7.3.3) lmn73; urgency=medium
     instead of whatever PyPI served on the day of the build. The build
     container is pinned by digest, the CI actions by commit, and releases
     are published as drafts first so their assets can be made immutable.
-    No behaviour change: the bundled library versions are exactly those of
-    7.3.2; configuration, service and upgrade path are unchanged.
+  * The build only takes Python releases that have been public for at least
+    a week. Two bundled libraries are therefore one release older than in
+    7.3.2, whose versions were then only days old: idna 3.19 (was 3.20) and
+    watchfiles 1.2.0 (was 1.3.0). Neither changes what the service does
+    (watchfiles is only used by uvicorn's auto-reload, which is off; idna only
+    for non-ASCII host names). All other library versions are those of 7.3.2;
+    configuration, service and upgrade path are unchanged.
 
  -- Kevin Stenzel <mail@kevin-stenzel.de>  Wed, 23 Sep 2026 13:45:12 +0200
 

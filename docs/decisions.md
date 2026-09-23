@@ -251,7 +251,8 @@ radius-and-ad.md § 3 und threat-model.md). **Quelle:** FreeRADIUS-Wiki „Rlm_l
 ### ADR-016 — Lieferkette: Python-Abhängigkeiten nur aus Lockfiles mit Hashes
 **Status:** Accepted (Stufe A „Lieferkette", 2026-09-23). **Entscheidung:** Das venv im
 `.deb` entsteht nur aus zwei Lockfiles, die `uv pip compile --generate-hashes
---python-version=3.12` erzeugt: `controlplane/requirements.lock` (Laufzeit, aus
+--python-version=3.12 --exclude-newer=P7D` erzeugt (nur Fassungen, die mindestens eine Woche
+auf PyPI liegen; in diesem Fenster fallen kompromittierte Uploads meist auf): `controlplane/requirements.lock` (Laufzeit, aus
 `pyproject.toml`) und `controlplane/build-requirements.lock` (pip selbst und setuptools,
 aus `build-requirements.in`). `build-deb.sh` installiert sie mit `--require-hashes
 --only-binary :all: --no-deps`, baut das eigene Paket offline zum Wheel (`--no-index
@@ -259,8 +260,9 @@ aus `build-requirements.in`). `build-deb.sh` installiert sie mit `--require-hash
 prüft mit `pip check`, entfernt setuptools wieder und bricht ab, wenn `pip freeze --all`
 nicht exakt den Lockfiles entspricht.
 `scripts/check-lockfiles.sh` (CI-Job `lockfile`) beweist, dass die Lockfiles zu ihren
-Quellen passen, jede Prüfsumme eine von PyPI für genau diese Fassung ist und jede Fassung
-ein Wheel für die Zielplattform hat (CPython 3.12, glibc 2.39, x86_64). Renovate hebt die
+Quellen passen (eine Fassung jünger als sieben Tage fällt dabei durch), jede Prüfsumme eine
+von PyPI für genau diese Fassung ist und jede Fassung ein Wheel für die Zielplattform hat
+(CPython 3.12, glibc 2.39, x86_64). Renovate hebt die
 Fassungen per PR, ohne Automerge. **Begründung:** ohne Pins zog jeder Release-Bau die
 neueste PyPI-Fassung ohne Prüfsumme; Bauten waren nicht reproduzierbar und eine
 kompromittierte Fassung wäre unbemerkt in ein root-installiertes Paket gelangt.
