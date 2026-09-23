@@ -95,7 +95,8 @@ jobs:
           python-version: "3.12"
       - name: Lockfiles match their sources, PyPI and the target platform
         run: |
-          pip install uv==0.12.18
+          pip install \
+            uv==0.12.18
           bash scripts/check-lockfiles.sh
 
   resolve:
