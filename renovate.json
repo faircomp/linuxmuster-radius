@@ -93,6 +93,19 @@
       "enabled": false
     },
     {
+      "description": "An Ubuntu base image follows the linuxmuster line too (24.04 for lmn73, also for the data-plane image and the E2E images): new digests yes, a new release (26.04) only by hand.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ubuntu"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "The github-actions manager reads renovate-version natively but expects a plain version there; on <version>@<digest> it would append a second digest. The regex manager owns the engine.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
+      "enabled": false
+    },
+    {
       "description": "setup-python mirrors the target Ubuntu's Python (3.12 on 24.04 for lmn73); it changes with the linuxmuster line, not with Python releases.",
       "matchManagers": ["github-actions"],
       "matchDepNames": ["python"],
