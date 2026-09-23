@@ -25,7 +25,7 @@ def _renovate_ci_pattern() -> re.Pattern[str]:
 def test_renovate_matches_every_pinned_ci_tool() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     pinned = dict(re.findall(r"^\s+([A-Za-z0-9_.-]+)==([0-9][0-9.]*)", ci, re.MULTILINE))
-    assert {"ruff", "mypy", "reuse", "pytest", "types-PyYAML"} <= set(pinned)
+    assert {"ruff", "mypy", "reuse", "pytest", "types-PyYAML", "uv"} <= set(pinned)
     found = {m["depName"]: m["currentValue"] for m in _renovate_ci_pattern().finditer(ci)}
     assert found == pinned
     assert found["types-PyYAML"].count(".") == 3  # the four-part version is captured whole

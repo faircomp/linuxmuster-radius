@@ -6,6 +6,17 @@
 # container upstream CI uses (proves it builds on the target Ubuntu/Python), and an
 # install smoke on ubuntu-24.04. The heavy winbind/EAP FreeRADIUS E2E runs on crabbox,
 # not in GitHub CI.
+#
+# Supply chain (stage A, linuxmusterDEV work/plans/paketarchiv.md §2): every input of the
+# build is pinned to an immutable reference, because a released .deb vouches for everything
+# that ran in its build.
+#  * Python dependencies from hash-pinned lockfiles (controlplane/*.lock, job `lockfile`).
+#  * Build image by digest. ghcr.io/linuxmuster/lmndev-runner:<tag> is a mutable tag of
+#    another org, rebuilt every week, and the build runs as root in it; `:<tag>@sha256:<digest>`
+#    pulls exactly that image (the digest wins, the tag only tells Renovate which tag's digest
+#    to follow). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
+#    different build than the one that is released.
+#  * Every action by full commit SHA with a `# vN` comment: a tag can be moved, a SHA cannot.
 name: ci
 
 on:
@@ -30,8 +41,8 @@ jobs:
   fast:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"        # = Ubuntu 24.04 / lmn73
       # The gate tools are PINNED on purpose: an unpinned `pip install ruff` picks up
@@ -39,7 +50,11 @@ jobs:
       # pipeline red without a single line of our code changing (exactly what happened
       # on 2026-08-04). Pinned == the developer's local result == CI's result. Renovate
       # proposes bumps as PRs, so upgrading stays a deliberate, reviewed step.
-      - name: Install control-plane + tools
+      # The runtime dependencies come from the hash-pinned lockfile the .deb is built from,
+      # installed AFTER the tools so no tool can move them: pytest and mypy see exactly
+      # the versions that ship (and the ones a Renovate lockfile bump proposes), not
+      # whatever PyPI serves today. pip check: the tools still fit the locked versions.
+      - name: Install control-plane (locked dependencies) + tools
         run: |
           pip install \
             ruff==0.15.21 \
@@ -47,7 +62,10 @@ jobs:
             reuse==6.2.0 \
             pytest==9.1.1 \
             types-PyYAML==6.0.12.20260906 \
-            pytest-asyncio httpx cryptography ./controlplane
+            pytest-asyncio
+          pip install --require-hashes --only-binary :all: --no-deps -r controlplane/requirements.lock
+          pip install --no-deps ./controlplane
+          pip check
       - name: ruff check
         run: ruff check .
       - name: ruff format
@@ -65,17 +83,38 @@ jobs:
       - name: reuse (license compliance)
         run: reuse lint
 
+  # build-deb.sh installs the lockfiles with --no-deps, so only this job notices a
+  # dependency added to pyproject.toml without re-locking, a hand-edited pin or hash, or a
+  # locked version without a wheel for the target (CPython 3.12, glibc 2.39, x86_64).
+  lockfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Lockfiles match their sources, PyPI and the target platform
+        run: |
+          pip install \
+            uv==0.12.18
+          bash scripts/check-lockfiles.sh
+
   resolve:
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.image.outputs.image }}
       version: ${{ steps.image.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: image
         run: |
           DIST=$(dpkg-parsechangelog -S Distribution); NUM="${DIST#lmn}"
-          if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then IMG=ghcr.io/linuxmuster/lmndev-runner:latest; else IMG=ghcr.io/linuxmuster/lmndev-runner:24.04; fi
+          # By digest, never by tag alone (see the header); Renovate proposes the bumps.
+          if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then
+            IMG=ghcr.io/linuxmuster/lmndev-runner:latest@sha256:d735e6ccc6fd9df71b2552b06ac6f5cb4bf2d03f40e14bafe47213325b7b801b
+          else
+            IMG=ghcr.io/linuxmuster/lmndev-runner:24.04@sha256:6b0c8ac994cf1d2da44b0b36ebd7b3b125094886e78293e04b9db5e515b8209e
+          fi
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
           echo "version=$(dpkg-parsechangelog -S Version)" >> "$GITHUB_OUTPUT"
 
@@ -86,7 +125,7 @@ jobs:
       image: ${{ needs.resolve.outputs.image }}
       options: --user root
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build package (make deb wraps packaging/build-deb.sh)
         run: |
           # No debian/control at the root yet (that is the debian/ conversion PR), so
@@ -94,7 +133,7 @@ jobs:
           apt-get update -qq && apt-get install -y -qq python3-venv
           make deb
           mkdir -p output && mv ./linuxmuster-radius_*.deb output/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages
           path: output/
@@ -104,7 +143,7 @@ jobs:
     needs: package
     runs-on: ubuntu-24.04              # the target OS; the venv python must match
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: packages
           path: packages/
@@ -145,8 +184,9 @@ jobs:
     permissions:
       contents: read        # restrictive org defaults must not break the asset download
     steps:
-      - uses: actions/checkout@v4          # needed for dpkg-parsechangelog and the fixtures
-      - uses: actions/download-artifact@v4
+      # needed for dpkg-parsechangelog and the fixtures
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: packages
           path: packages/

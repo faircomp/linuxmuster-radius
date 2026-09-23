@@ -4,20 +4,33 @@
 
 # Self-hosted Renovate — so digest bumps work without depending on the org-level
 # Renovate/Mend GitHub App. Runs weekly and on demand. It opens PRs that bump the
-# @sha256 pins (the data-plane image DEFAULT_IMAGE via the customManager in
-# renovate.json, plus every Dockerfile / docker-compose image) — a human MUST
-# merge them (packageRules automerge:false); merging feeds a new .deb release.
+# @sha256 pins (the data-plane image DEFAULT_IMAGE, every Dockerfile / docker-compose
+# image, the lmndev-runner build image), the Python lockfiles controlplane/*.lock, the
+# action SHAs, the pinned CI tools and the Renovate engine itself — a human MUST merge
+# them (automerge is off in renovate.json); merging feeds a new .deb release.
 #
-# TOKEN: uses a RENOVATE_TOKEN repo secret (a fine-grained/classic PAT with
-# contents+pull-requests write) if present, else falls back to the built-in
-# GITHUB_TOKEN. A PAT is RECOMMENDED so the CI workflows actually run on Renovate's
-# PRs (PRs created with GITHUB_TOKEN do not trigger other workflows).
+# NEVER GREEN WITHOUT DOING ITS JOB. From 2026-07-10 to 2026-09-23 this workflow ended green
+# every week while Renovate did nothing: the action's default engine (Renovate 39) rejected
+# `managerFilePatterns`, and the only trace was issue #1. Hence:
+#  * ENGINE pinned by version AND digest in RENOVATE_VERSION (one place, bumped by Renovate's
+#    regex manager); every action pinned by full commit SHA (`# vN` names the tag).
+#  * CONFIG validated first with renovate-config-validator --strict from that same engine
+#    image; an invalid renovate.json fails the job instead of a silent no-op.
+#  * TOKEN: repo secret RENOVATE_TOKEN is REQUIRED. GitHub never lets GITHUB_TOKEN push
+#    workflow files (the action SHAs and the build image digest live there), and PRs opened
+#    with GITHUB_TOKEN start no CI. Use a fine-grained PAT limited to this repo with
+#    Contents, Pull requests, Issues and Workflows: read and write. Without it every run
+#    fails, except a manual dry run, which only warns.
+# After a change to renovate.json or this file: `gh workflow run renovate.yml -f dryRun=true`.
 
 name: Renovate
 
 on:
   schedule:
-    - cron: "0 4 * * 1" # every Monday 04:00 UTC
+    # Thursday 04:00 UTC. lmndev-runner is rebuilt Mondays 03:00 UTC, so a build image digest
+    # PR proposes an image that has been public for three days; ghcr.io gives Renovate no
+    # timestamps, so this is the only age brake for images (PyPI: minimumReleaseAge).
+    - cron: "0 4 * * 4"
   workflow_dispatch:
     inputs:
       dryRun:
@@ -42,14 +55,36 @@ concurrency:
 jobs:
   renovate:
     runs-on: ubuntu-24.04
+    env:
+      RENOVATE_VERSION: 44.105.4@sha256:e155ebea05260c388f12afa521fc23a485f119b32b0108ed9b17616f079e7519
+      HAS_RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN != '' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate renovate.json with the pinned engine
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint renovate-config-validator \
+            "ghcr.io/renovatebot/renovate:$RENOVATE_VERSION" --strict
+
+      - name: Require RENOVATE_TOKEN (only a manual dry run may go without)
+        if: env.HAS_RENOVATE_TOKEN != 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dryRun }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] && [ "$DRY_RUN" = true ]; then
+            echo "::warning::RENOVATE_TOKEN is not set; a dry run only plans, a real run would fail"
+          else
+            echo "::error::RENOVATE_TOKEN is not set; with GITHUB_TOKEN Renovate cannot push workflow files and its PRs start no CI"
+            exit 1
+          fi
 
       - name: Renovate
-        uses: renovatebot/github-action@v41.0.8
+        uses: renovatebot/github-action@f24426972367551f3391720e34317783a92fd32b # v41.0.8
         with:
           token: ${{ secrets.RENOVATE_TOKEN || github.token }}
+          renovate-version: ${{ env.RENOVATE_VERSION }}
         env:
           RENOVATE_REPOSITORIES: ${{ github.repository }}
           RENOVATE_PLATFORM: github

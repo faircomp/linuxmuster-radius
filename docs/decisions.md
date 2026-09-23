@@ -248,6 +248,52 @@ Control Plane `LDAP_CA` nie, die Verbindung war unverifiziert; Details in
 radius-and-ad.md § 3 und threat-model.md). **Quelle:** FreeRADIUS-Wiki „Rlm_ldap"
 (GnuTLS-vs-OpenSSL-Warnung); reproduziert + behoben im Live-E2E (references.md).
 
+### ADR-016 — Lieferkette: Python-Abhängigkeiten nur aus Lockfiles mit Hashes
+**Status:** Accepted (Stufe A „Lieferkette", 2026-09-23). **Entscheidung:** Das venv im
+`.deb` entsteht nur aus zwei Lockfiles, die `uv pip compile --generate-hashes
+--python-version=3.12 --exclude-newer=P7D` erzeugt (nur Fassungen, die mindestens eine Woche
+auf PyPI liegen; in diesem Fenster fallen kompromittierte Uploads meist auf): `controlplane/requirements.lock` (Laufzeit, aus
+`pyproject.toml`) und `controlplane/build-requirements.lock` (pip selbst und setuptools,
+aus `build-requirements.in`). `build-deb.sh` installiert sie mit `--require-hashes
+--only-binary :all: --no-deps`, baut das eigene Paket offline zum Wheel (`--no-index
+--no-build-isolation`) und installiert es per Namen (kein Build-Pfad in `direct_url.json`),
+prüft mit `pip check`, entfernt setuptools wieder und bricht ab, wenn `pip freeze --all`
+nicht exakt den Lockfiles entspricht.
+`scripts/check-lockfiles.sh` (CI-Job `lockfile`) beweist, dass die Lockfiles zu ihren
+Quellen passen (eine Fassung jünger als sieben Tage fällt dabei durch), jede Prüfsumme eine
+von PyPI für genau diese Fassung ist und jede Fassung ein Wheel für die Zielplattform hat
+(CPython 3.12, glibc 2.39, x86_64). Renovate hebt die
+Fassungen per PR, ohne Automerge. **Begründung:** ohne Pins zog jeder Release-Bau die
+neueste PyPI-Fassung ohne Prüfsumme; Bauten waren nicht reproduzierbar und eine
+kompromittierte Fassung wäre unbemerkt in ein root-installiertes Paket gelangt.
+**Verworfene Alternativen:** Pins ohne Hashes (schützen nicht gegen eine ausgetauschte
+Datei); pip-tools (gleiches Format, langsamer; uv ist das Werkzeug, das Renovate für
+dieses Format ausführt); `--python-platform`/`--only-binary` im Lockfile-Kopf (Renovate
+lehnt beide Optionen ab, deshalb prüft der CI-Job die Zielplattform in einer zweiten
+Auflösung). **Quelle:** pip-Doku „Secure installs" (hash-checking mode); Renovate-Quelltext
+`lib/modules/manager/pip-compile/common.ts` (erlaubte uv-Optionen, 44.93.5).
+
+### ADR-017 — Build-Eingaben unveränderlich referenziert, Release erst als Entwurf
+**Status:** Accepted (Stufe A „Lieferkette", 2026-09-23). **Entscheidung:** Das Build-Image
+steht überall als `ghcr.io/linuxmuster/lmndev-runner:<tag>@sha256:<digest>` (ci.yml,
+release.yml und der Build-Befehl im Makefile, derselbe Digest). Renovate schlägt neue
+Digests als PR vor, ein Mensch merged; den Tag ändert Renovate nie (`24.04 → 26.04` wäre
+eine neue linuxmuster-Linie, kein Update). Jede GitHub Action steht per vollständigem
+Commit-SHA mit `# vN`-Kommentar (`helpers:pinGitHubActionDigests`). Das Release legt die
+`gh`-CLI des Runners an (keine Dritt-Action neben `contents: write`): erst als Entwurf, dann
+die Assets, dann der Abgleich der von GitHub berechneten sha256 mit den gebauten Dateien,
+erst danach wird veröffentlicht. **Begründung:** beide Tags baut eine fremde Org
+wöchentlich neu, der Build läuft darin als root; ein still geändertes Image änderte jedes
+künftige `.deb`. Ein Action-Tag lässt sich verschieben, ein SHA nicht. Ein unveränderliches
+Release („immutable release") lässt sich nach dem Veröffentlichen weder um Assets ergänzen
+noch austauschen, deshalb die Reihenfolge Entwurf → Assets → Veröffentlichen.
+**Verworfene Alternativen:** eigenes Build-Image oder `ubuntu:24.04@sha256` mit
+`apt-get build-dep` (Stufe C im Hub-Plan, setzt den debian/-Umbau voraus);
+`softprops/action-gh-release` per SHA pinnen (bliebe Fremdcode mit Schreibrecht neben dem
+`.deb`). **Quelle:** Hub `work/plans/paketarchiv.md` §2; GitHub-Doku „Immutable releases"
+(„Create the release as a draft. Attach all associated assets to the draft release. Publish
+the draft release.").
+
 ---
 
 ## Site-Fakten zu verifizieren (P0, mit Quelle/Datum eintragen)

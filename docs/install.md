@@ -255,5 +255,7 @@ sudo apt upgrade                               # neues .deb -> postinst: try-res
 `update-all` hebt **jede Instanz auf das im `.deb` gepinnte Image**, pro Instanz mit Health-Check und
 **automatischem Rollback**. Neue Images kommen via **Renovate**: ein neues GHCR-Image → Renovate
 öffnet einen **Digest-Bump-PR** (`DEFAULT_IMAGE`), ein Mensch merged → neuer `v*`-Tag → neues `.deb`
-→ `apt upgrade`. *(Für CI auf den Renovate-PRs ein `RENOVATE_TOKEN`-PAT als Repo-Secret hinterlegen;
-sonst läuft Renovate mit dem `GITHUB_TOKEN`, dann triggern die PRs keine Folge-Workflows.)*
+→ `apt upgrade`. *(Für das Repo: das Secret `RENOVATE_TOKEN`, ein fine-grained PAT nur für dieses Repo
+mit Contents, Pull requests, Issues und Workflows: read and write, ist Pflicht. Mit dem `GITHUB_TOKEN`
+starten Renovate-PRs keine CI, und Änderungen unter `.github/workflows/` (Action-SHAs, Build-Image-
+Digest) darf er gar nicht pushen.)*

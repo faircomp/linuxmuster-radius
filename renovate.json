@@ -1,7 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "docker:pinDigests"],
+  "description": "Supply chain (stage A): keep every pinned input current through reviewable PRs -- the data-plane image digest, the hash-pinned Python lockfiles, the SHA-pinned actions, the digest-pinned build image, the pinned CI tools and the pinned Renovate engine. Nothing is automerged.",
+  "extends": ["config:recommended", "docker:pinDigests", "helpers:pinGitHubActionDigests"],
+  "automerge": false,
+  "semanticCommits": "enabled",
   "docker-compose": { "enabled": true },
+  "pip-compile": {
+    "description": "The hash-pinned lockfiles build-deb.sh installs with --require-hashes. Renovate re-runs the command in each header (uv pip compile ... --generate-hashes) inside controlplane/; scripts/check-lockfiles.sh (CI job `lockfile`) proves the result.",
+    "managerFilePatterns": ["/^controlplane/(build-)?requirements\\.lock$/"],
+    "lockFileMaintenance": {
+      "description": "The only way the Python lockfiles move: the dependencies in pyproject.toml carry no version (Renovate skips them as unspecified-version) and the transitive ones are indirect (disabled by default). On every run (the workflow runs weekly) Renovate deletes each lockfile and re-runs its header command, i.e. a fresh resolution with fresh hashes, as ONE reviewable PR. The header's --exclude-newer=P7D keeps releases younger than a week out (minimumReleaseAge cannot: lock maintenance has no package timestamps). The schedule lives in the workflow cron only; the default (before 4am on monday) would never match it.",
+      "enabled": true,
+      "schedule": ["at any time"]
+    }
+  },
   "customManagers": [
     {
       "customType": "regex",
@@ -18,10 +30,29 @@
     },
     {
       "customType": "regex",
-      "description": "Bump the PINNED CI gate tools (ruff/mypy/reuse/pytest/types-PyYAML) that ci.yml installs inside a `pip install` run-step. They are pinned so a linter widening its default rules cannot turn the pipeline red on its own; Renovate keeps them current as reviewable PRs. The version part accepts any number of dot-separated components (types-PyYAML uses four, e.g. 6.0.12.20260906).",
+      "description": "Build image pinned as <image>:<tag>@sha256:<digest> in ci.yml, release.yml and the build command in the Makefile. The captured tag tells Renovate which tag's digest to follow.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/", "/^Makefile$/"],
+      "matchStrings": [
+        "(?<depName>ghcr\\.io/linuxmuster/lmndev-runner):(?<currentValue>[\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "The Renovate engine itself, pinned as RENOVATE_VERSION: <version>@sha256:<digest> in renovate.yml (used by the config validator step and by the action; the action's default engine is too old for this config).",
+      "managerFilePatterns": ["/^\\.github/workflows/renovate\\.ya?ml$/"],
+      "matchStrings": [
+        "RENOVATE_VERSION: (?<currentValue>\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "depNameTemplate": "ghcr.io/renovatebot/renovate",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Bump the PINNED CI tools (ruff/mypy/reuse/pytest/types-PyYAML, uv for the lockfile check) that ci.yml installs inside a `pip install` run-step. They are pinned so a linter widening its default rules cannot turn the pipeline red on its own; Renovate keeps them current as reviewable PRs. The version part accepts any number of dot-separated components (types-PyYAML uses four, e.g. 6.0.12.20260906).",
       "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
       "matchStrings": [
-        "(?<depName>ruff|mypy|reuse|pytest|types-PyYAML)==(?<currentValue>[0-9]+(?:\\.[0-9]+)+)"
+        "(?<depName>ruff|mypy|reuse|pytest|types-PyYAML|uv)==(?<currentValue>[0-9]+(?:\\.[0-9]+)+)"
       ],
       "datasourceTemplate": "pypi"
     }
@@ -31,6 +62,64 @@
       "description": "Data-plane image: pin/update by immutable digest only. A human MUST merge (never auto-apply a new image to a school's live RADIUS).",
       "matchDatasources": ["docker"],
       "pinDigests": true,
+      "automerge": false
+    },
+    {
+      "description": "Build image: never change the tag (24.04 -> 26.04 would be a new linuxmuster line, not an update), only follow its digest.",
+      "matchPackageNames": ["ghcr.io/linuxmuster/lmndev-runner"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
+    },
+    {
+      "description": "Build image digests in one PR, so ci.yml, release.yml and the Makefile always build with the same image. A human reviews and merges it.",
+      "matchPackageNames": ["ghcr.io/linuxmuster/lmndev-runner"],
+      "matchUpdateTypes": ["digest"],
+      "groupName": "lmndev-runner build image",
+      "automerge": false
+    },
+    {
+      "description": "PyPI releases (the pinned CI tools) only once they are a week old, the window in which a compromised upload is usually noticed and yanked. PyPI only: ghcr.io gives no release timestamps, so an age rule on Docker would hold those updates forever (the workflow's Thursday cron is their age brake).",
+      "matchDatasources": ["pypi"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Python lockfiles: every bump is a supply-chain change of the shipped venv; a human merges it after CI (lockfile, fast tier on the new versions, package, install and upgrade smoke) is green.",
+      "matchManagers": ["pip-compile"],
+      "automerge": false
+    },
+    {
+      "description": "Actions stay pinned by commit SHA with a # vN comment; a human merges every bump.",
+      "matchManagers": ["github-actions"],
+      "automerge": false
+    },
+    {
+      "description": "runs-on: install-smoke and upgrade-smoke run on the target OS (Ubuntu 24.04 for lmn73), which changes with the linuxmuster line, not with GitHub's runner images.",
+      "matchDatasources": ["github-runners"],
+      "enabled": false
+    },
+    {
+      "description": "An Ubuntu base image follows the linuxmuster line too (24.04 for lmn73, also for the data-plane image and the E2E images): new digests yes, a new release (26.04) only by hand.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ubuntu"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "The github-actions manager reads renovate-version natively but expects a plain version there; on <version>@<digest> it would append a second digest. The regex manager owns the engine.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
+      "enabled": false
+    },
+    {
+      "description": "setup-python mirrors the target Ubuntu's Python (3.12 on 24.04 for lmn73); it changes with the linuxmuster line, not with Python releases.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["python"],
+      "enabled": false
+    },
+    {
+      "description": "Renovate engine: one PR that moves along until it is merged.",
+      "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
+      "groupName": "renovate engine",
       "automerge": false
     }
   ]

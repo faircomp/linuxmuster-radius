@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The tooling packaging/build-deb.sh installs into the venv before the runtime
+# dependencies: pip itself (replacing the one ensurepip bootstrapped) and the build
+# backend of the control plane, so `pip install ./controlplane` runs without build
+# isolation and fetches nothing unhashed. Locked in build-requirements.lock.
+pip
+setuptools>=68  # = [build-system].requires in pyproject.toml
