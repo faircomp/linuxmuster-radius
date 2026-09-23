@@ -1,3 +1,17 @@
+linuxmuster-radius (7.3.3) lmn73; urgency=medium
+
+  * Reproducible builds with verified dependencies: the Python environment
+    under /opt/linuxmuster-radius/venv is now installed only from lockfiles
+    that pin every package, pip included, by version and SHA-256 hash, so
+    every build of a release carries exactly the same, verified files
+    instead of whatever PyPI served on the day of the build. The build
+    container is pinned by digest, the CI actions by commit, and releases
+    are published as drafts first so their assets can be made immutable.
+    No behaviour change: the bundled library versions are exactly those of
+    7.3.2; configuration, service and upgrade path are unchanged.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Wed, 23 Sep 2026 13:45:12 +0200
+
 linuxmuster-radius (7.3.2) lmn73; urgency=medium
 
   * CI gains the upgrade-smoke job: every push and every release now installs
