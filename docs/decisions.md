@@ -254,8 +254,10 @@ radius-and-ad.md § 3 und threat-model.md). **Quelle:** FreeRADIUS-Wiki „Rlm_l
 --python-version=3.12` erzeugt: `controlplane/requirements.lock` (Laufzeit, aus
 `pyproject.toml`) und `controlplane/build-requirements.lock` (pip selbst und setuptools,
 aus `build-requirements.in`). `build-deb.sh` installiert sie mit `--require-hashes
---only-binary :all: --no-deps`, das eigene Paket offline (`--no-index
---no-build-isolation --no-deps`), prüft mit `pip check` und entfernt setuptools wieder.
+--only-binary :all: --no-deps`, baut das eigene Paket offline zum Wheel (`--no-index
+--no-build-isolation`) und installiert es per Namen (kein Build-Pfad in `direct_url.json`),
+prüft mit `pip check`, entfernt setuptools wieder und bricht ab, wenn `pip freeze --all`
+nicht exakt den Lockfiles entspricht.
 `scripts/check-lockfiles.sh` (CI-Job `lockfile`) beweist, dass die Lockfiles zu ihren
 Quellen passen, jede Prüfsumme eine von PyPI für genau diese Fassung ist und jede Fassung
 ein Wheel für die Zielplattform hat (CPython 3.12, glibc 2.39, x86_64). Renovate hebt die

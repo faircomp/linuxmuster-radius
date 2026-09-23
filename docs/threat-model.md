@@ -60,7 +60,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
   Bauten desselben Tags konnten sich unterscheiden. **Gegenmaßnahme (7.3.3):** das venv
   entsteht nur aus `controlplane/requirements.lock` und `build-requirements.lock` (Version
   und sha256 je Datei, `--require-hashes --only-binary :all: --no-deps`, eigenes Paket
-  offline), danach `pip check`; der CI-Job `lockfile` prüft die Lockfiles gegen
+  offline), danach `pip check`, und der Bau bricht ab, wenn das venv nicht exakt den
+  Lockfiles entspricht; der CI-Job `lockfile` prüft die Lockfiles gegen
   `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per Renovate-PR, den
   ein Mensch merged (ADR-016). Das Build-Image (`lmndev-runner`, fremde Org, wöchentlich
   neu gebaut, Build als root) steht per Digest, jede Action per Commit-SHA; das Release
