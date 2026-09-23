@@ -373,8 +373,12 @@ jobs:
         with:
           name: packages
           path: packages/
-      # Draft -> assets -> digest check -> publish (why: see the header). The gh CLI ships with
-      # the runner; ids and digests are read through `gh api` so an older gh works as well.
+      # Draft -> assets -> digest check -> publish (why: see the header), all through the REST
+      # API with the gh CLI that ships with the runner. The draft is addressed by the id its
+      # create call returns, never by tag: right after a create the release list does not show
+      # the draft yet (lmn-gpo v7.3.4, run 35865217323, failed on exactly that), GET
+      # releases/tags/{tag} never returns drafts, and `gh release upload/edit <tag>` resolve a
+      # draft by its tag as well.
       - name: Publish the GitHub release (draft first)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -386,29 +390,78 @@ jobs:
           # .changes/.buildinfo join the assets with the debian/ conversion (dpkg-buildpackage).
           assets=(packages/*.deb)
           [ "${#assets[@]}" -gt 0 ] || { echo "::error::no .deb to publish"; exit 1; }
-          pre=(); case "$TAG" in *-rc*) pre=(--prerelease) ;; esac
-          lookup() { gh api "repos/$GH_REPO/releases?per_page=100" \
-                       --jq '.[] | select(.tag_name == env.TAG) | "\(.id) \(.draft)"'; }
-          found=$(lookup)
-          case "$found" in
-            "")       gh release create "$TAG" --draft --verify-tag --title "$TAG" \
-                        --generate-notes "${pre[@]}"
-                      found=$(lookup) ;;
-            *" true") echo "::notice::re-run: completing the draft a failed run left behind" ;;
-            *)        echo "::error::$TAG is already published; its assets are never replaced"; exit 1 ;;
-          esac
-          if [ "$(printf '%s\n' "$found" | wc -l)" != 1 ] || [ "${found#* }" != true ]; then
-            echo "::error::expected exactly one draft for $TAG, got: $found"; exit 1
+          # GitHub renames special characters in asset names (`~` becomes `.`, `+` stays), so
+          # names are compared in this normalised form, in which no two assets may collide.
+          norm() { local n=${1##*/}; printf '%s\n' "${n//[^A-Za-z0-9._-]/.}"; }
+          dup=$(for f in "${assets[@]}"; do norm "$f"; done | sort | uniq -d)
+          [ -z "$dup" ] || { echo "::error::assets collide on GitHub as: $dup"; exit 1; }
+          # Only a draft that an EARLIER run left behind is found by listing: it is minutes old,
+          # so the list has caught up. A draft this run creates is never looked up. The retry
+          # covers transient API errors only; an empty answer is final.
+          lookup() {
+            local i out
+            for i in 1 2 3; do
+              if out=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+                         --jq '.[] | select(.tag_name == env.TAG) | "\(.id) \(.draft)"'); then
+                printf '%s' "$out"; return 0
+              fi
+              echo "::warning::listing the releases failed (attempt $i of 3)" >&2; sleep $((i * 5))
+            done
+            return 1
+          }
+          found=$(lookup) || { echo "::error::cannot list the releases of $GH_REPO"; exit 1; }
+          if grep -q ' false$' <<< "$found"; then
+            echo "::error::$TAG is already published; its assets are never replaced"; exit 1
           fi
-          rid=${found%% *}
-          gh release upload "$TAG" "${assets[@]}" --clobber
-          # Publish only what was built: GitHub's sha256 of every asset on the draft must equal
-          # the built files, as a set (GitHub may rename files, e.g. `~` in a version).
-          sha256sum "${assets[@]}" | cut -d' ' -f1 | sort > built.sha256
-          gh api "repos/$GH_REPO/releases/$rid/assets?per_page=100" \
-            --jq '.[].digest | ltrimstr("sha256:")' | sort > uploaded.sha256
+          # Publishing a draft creates a missing tag at the default branch, so the tag must exist
+          # (what `gh release create --verify-tag` checked before).
+          gh api "repos/$GH_REPO/git/ref/tags/$TAG" --silent \
+            || { echo "::error::tag $TAG does not exist in $GH_REPO"; exit 1; }
+          case "$(grep -c . <<< "$found" || true)" in
+            0) prerelease=false; case "$TAG" in *-rc*) prerelease=true ;; esac
+               rid=$(gh api -X POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f name="$TAG" \
+                       -F draft=true -F prerelease="$prerelease" -F generate_release_notes=true \
+                       --jq .id)
+               echo "created draft $rid for $TAG" ;;
+            1) rid=${found%% *}
+               echo "::notice::re-run: completing draft $rid that a failed run left behind" ;;
+            *) echo "::error::more than one draft for $TAG: $(tr '\n' ' ' <<< "$found")"; exit 1 ;;
+          esac
+          [[ "$rid" =~ ^[0-9]+$ ]] || { echo "::error::no release id for $TAG: $rid"; exit 1; }
+          # Upload by id, idempotently: an asset of the same name that is already on the draft
+          # stays if its sha256 matches and is replaced if not (a rebuild, or an upload a failed
+          # run left half done). Assets are deleted only while the release is still a draft.
+          on_draft=$(gh api --paginate "repos/$GH_REPO/releases/$rid/assets?per_page=100" \
+                       --jq '.[] | "\(.id) \(.digest // "none") \(.name)"')
+          for f in "${assets[@]}"; do
+            name=$(norm "$f"); sha=$(sha256sum "$f" | cut -d' ' -f1); have=
+            while read -r aid digest aname <&3; do
+              if [ -z "$aid" ] || [ "$(norm "$aname")" != "$name" ]; then continue; fi
+              if [ "$digest" = "sha256:$sha" ]; then have=1; continue; fi
+              [ "$(gh api "repos/$GH_REPO/releases/$rid" --jq .draft)" = true ] \
+                || { echo "::error::release $rid is no longer a draft, not touching it"; exit 1; }
+              echo "replacing $aname on the draft ($digest, built sha256:$sha)"
+              gh api -X DELETE "repos/$GH_REPO/releases/assets/$aid"
+            done 3<<< "$on_draft"
+            if [ -n "$have" ]; then echo "$name is already on the draft, same sha256"; continue; fi
+            url="https://uploads.github.com/repos/$GH_REPO/releases/$rid/assets?name=$(jq -rn --arg n "${f##*/}" '$n | @uri')"
+            if ! resp=$(curl --fail-with-body -sS -X POST -H "Authorization: Bearer $GH_TOKEN" \
+                          -H "Accept: application/vnd.github+json" \
+                          -H "Content-Type: application/octet-stream" --data-binary "@$f" "$url"); then
+              echo "$resp" >&2; echo "::error::upload of $f failed"; exit 1
+            fi
+            jq -r '"uploaded \(.name): \(.size) bytes, \(.digest)"' <<< "$resp"
+          done
+          # Publish only what was built: the draft must hold exactly the built files, compared as
+          # (sha256 as computed by GitHub, normalised name), nothing more and nothing less.
+          for f in "${assets[@]}"; do
+            printf '%s %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$(norm "$f")"
+          done | sort > built.sha256
+          gh api --paginate "repos/$GH_REPO/releases/$rid/assets?per_page=100" \
+              --jq '.[] | "\(.digest // "none" | ltrimstr("sha256:")) \(.name)"' \
+            | while read -r d n; do printf '%s %s\n' "$d" "$(norm "$n")"; done | sort > uploaded.sha256
           diff built.sha256 uploaded.sha256 \
             || { echo "::error::assets on the draft differ from the build, not publishing"; exit 1; }
-          gh release edit "$TAG" --draft=false
+          gh api -X PATCH "repos/$GH_REPO/releases/$rid" -F draft=false --jq '"published \(.html_url)"'
           immutable=$(gh api "repos/$GH_REPO/releases/$rid" --jq '.immutable' || true)
           [ "$immutable" = true ] || echo "::warning::$TAG is published but not immutable (immutable=$immutable)"
