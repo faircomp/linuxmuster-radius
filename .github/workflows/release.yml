@@ -16,6 +16,14 @@
 #    to follow). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
 #    different build than the one that is released.
 #  * Every action by full commit SHA with a `# vN` comment: a tag can be moved, a SHA cannot.
+#  * No third-party release action next to `contents: write`: the release job uses the gh CLI
+#    that ships with the runner.
+#  * Draft first: the release is created as a DRAFT, all assets are uploaded, their sha256 as
+#    computed by GitHub is compared with the built files, and only then is it published. GitHub
+#    immutable releases require this order: publishing freezes the tag and the assets, so a
+#    release that is published first cannot receive its assets afterwards
+#    (https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases).
+#    A failed run leaves only a draft, which a re-run of the job completes.
 name: release
 
 on:
@@ -365,10 +373,42 @@ jobs:
         with:
           name: packages
           path: packages/
-      - uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          prerelease: ${{ contains(github.ref_name, '-rc') }}
+      # Draft -> assets -> digest check -> publish (why: see the header). The gh CLI ships with
+      # the runner; ids and digests are read through `gh api` so an older gh works as well.
+      - name: Publish the GitHub release (draft first)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}     # through env, never interpolated into the script
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
           # .changes/.buildinfo join the assets with the debian/ conversion (dpkg-buildpackage).
-          files: packages/*.deb
-          generate_release_notes: true
+          assets=(packages/*.deb)
+          [ "${#assets[@]}" -gt 0 ] || { echo "::error::no .deb to publish"; exit 1; }
+          pre=(); case "$TAG" in *-rc*) pre=(--prerelease) ;; esac
+          lookup() { gh api "repos/$GH_REPO/releases?per_page=100" \
+                       --jq '.[] | select(.tag_name == env.TAG) | "\(.id) \(.draft)"'; }
+          found=$(lookup)
+          case "$found" in
+            "")       gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+                        --generate-notes "${pre[@]}"
+                      found=$(lookup) ;;
+            *" true") echo "::notice::re-run: completing the draft a failed run left behind" ;;
+            *)        echo "::error::$TAG is already published; its assets are never replaced"; exit 1 ;;
+          esac
+          if [ "$(printf '%s\n' "$found" | wc -l)" != 1 ] || [ "${found#* }" != true ]; then
+            echo "::error::expected exactly one draft for $TAG, got: $found"; exit 1
+          fi
+          rid=${found%% *}
+          gh release upload "$TAG" "${assets[@]}" --clobber
+          # Publish only what was built: GitHub's sha256 of every asset on the draft must equal
+          # the built files, as a set (GitHub may rename files, e.g. `~` in a version).
+          sha256sum "${assets[@]}" | cut -d' ' -f1 | sort > built.sha256
+          gh api "repos/$GH_REPO/releases/$rid/assets?per_page=100" \
+            --jq '.[].digest | ltrimstr("sha256:")' | sort > uploaded.sha256
+          diff built.sha256 uploaded.sha256 \
+            || { echo "::error::assets on the draft differ from the build, not publishing"; exit 1; }
+          gh release edit "$TAG" --draft=false
+          immutable=$(gh api "repos/$GH_REPO/releases/$rid" --jq '.immutable' || true)
+          [ "$immutable" = true ] || echo "::warning::$TAG is published but not immutable (immutable=$immutable)"

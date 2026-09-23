@@ -269,18 +269,26 @@ lehnt beide Optionen ab, deshalb prüft der CI-Job die Zielplattform in einer zw
 Auflösung). **Quelle:** pip-Doku „Secure installs" (hash-checking mode); Renovate-Quelltext
 `lib/modules/manager/pip-compile/common.ts` (erlaubte uv-Optionen, 44.93.5).
 
-### ADR-017 — Build-Eingaben unveränderlich referenziert
+### ADR-017 — Build-Eingaben unveränderlich referenziert, Release erst als Entwurf
 **Status:** Accepted (Stufe A „Lieferkette", 2026-09-23). **Entscheidung:** Das Build-Image
 steht überall als `ghcr.io/linuxmuster/lmndev-runner:<tag>@sha256:<digest>` (ci.yml,
 release.yml und der Build-Befehl im Makefile, derselbe Digest). Renovate schlägt neue
 Digests als PR vor, ein Mensch merged; den Tag ändert Renovate nie (`24.04 → 26.04` wäre
 eine neue linuxmuster-Linie, kein Update). Jede GitHub Action steht per vollständigem
-Commit-SHA mit `# vN`-Kommentar (`helpers:pinGitHubActionDigests`). **Begründung:** beide
-Tags baut eine fremde Org wöchentlich neu, der Build läuft darin als root; ein still
-geändertes Image änderte jedes künftige `.deb`. Ein Action-Tag lässt sich verschieben, ein
-SHA nicht. **Verworfene Alternative:** eigenes Build-Image oder `ubuntu:24.04@sha256`
-mit `apt-get build-dep` (Stufe C im Hub-Plan, setzt den debian/-Umbau voraus).
-**Quelle:** Hub `work/plans/paketarchiv.md` §2.
+Commit-SHA mit `# vN`-Kommentar (`helpers:pinGitHubActionDigests`). Das Release legt die
+`gh`-CLI des Runners an (keine Dritt-Action neben `contents: write`): erst als Entwurf, dann
+die Assets, dann der Abgleich der von GitHub berechneten sha256 mit den gebauten Dateien,
+erst danach wird veröffentlicht. **Begründung:** beide Tags baut eine fremde Org
+wöchentlich neu, der Build läuft darin als root; ein still geändertes Image änderte jedes
+künftige `.deb`. Ein Action-Tag lässt sich verschieben, ein SHA nicht. Ein unveränderliches
+Release („immutable release") lässt sich nach dem Veröffentlichen weder um Assets ergänzen
+noch austauschen, deshalb die Reihenfolge Entwurf → Assets → Veröffentlichen.
+**Verworfene Alternativen:** eigenes Build-Image oder `ubuntu:24.04@sha256` mit
+`apt-get build-dep` (Stufe C im Hub-Plan, setzt den debian/-Umbau voraus);
+`softprops/action-gh-release` per SHA pinnen (bliebe Fremdcode mit Schreibrecht neben dem
+`.deb`). **Quelle:** Hub `work/plans/paketarchiv.md` §2; GitHub-Doku „Immutable releases"
+(„Create the release as a draft. Attach all associated assets to the draft release. Publish
+the draft release.").
 
 ---
 

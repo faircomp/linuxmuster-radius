@@ -63,7 +63,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
   offline), danach `pip check`; der CI-Job `lockfile` prüft die Lockfiles gegen
   `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per Renovate-PR, den
   ein Mensch merged (ADR-016). Das Build-Image (`lmndev-runner`, fremde Org, wöchentlich
-  neu gebaut, Build als root) steht per Digest, jede Action per Commit-SHA (ADR-017).
+  neu gebaut, Build als root) steht per Digest, jede Action per Commit-SHA; das Release
+  entsteht als Entwurf und wird erst nach dem sha256-Abgleich der Assets veröffentlicht
+  (ADR-017).
   **Restlücke:** wer einen Bump-PR merged, vertraut der neuen Fassung — die Prüfsumme belegt nur, dass genau diese Datei gebaut wird, nicht, dass sie
   gutartig ist. **Verifikation:** zwei Bauten ergeben dieselbe Paketliste, `pip freeze`
   im venv = Lockfile; Negativtests des Lockfile-Checks (`work/campaign/stufe-a-radius.md`
