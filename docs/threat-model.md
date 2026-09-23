@@ -53,6 +53,20 @@ SPDX-License-Identifier: GPL-3.0-or-later
 - **Leichen im AD nach `rm`** — bis 7.3.0 blieben Computerkonto, DNS-Record und
   Maschinen-Secret-Volume zurück (verwaiste Anmeldeidentität). Seit 7.3.1 verlässt `rm`
   die Domäne (Konto + Record gelöscht) und entfernt das Volume.
+- **Manipulierte Build-Eingaben (Lieferkette)** — das `.deb` wird auf Schulservern als
+  root installiert; was in den Build-Job gelangt, landet im Paket. Bis 7.3.2 holte
+  `build-deb.sh` die Python-Abhängigkeiten ungepinnt und ohne Prüfsumme von PyPI: eine
+  kompromittierte oder brechende Fassung wäre ohne Codeänderung ausgeliefert worden, zwei
+  Bauten desselben Tags konnten sich unterscheiden. **Gegenmaßnahme (7.3.3):** das venv
+  entsteht nur aus `controlplane/requirements.lock` und `build-requirements.lock` (Version
+  und sha256 je Datei, `--require-hashes --only-binary :all: --no-deps`, eigenes Paket
+  offline), danach `pip check`; der CI-Job `lockfile` prüft die Lockfiles gegen
+  `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per Renovate-PR, den
+  ein Mensch merged (ADR-016). **Restlücke:** wer einen Bump-PR merged, vertraut der neuen
+  Fassung — die Prüfsumme belegt nur, dass genau diese Datei gebaut wird, nicht, dass sie
+  gutartig ist. **Verifikation:** zwei Bauten ergeben dieselbe Paketliste, `pip freeze`
+  im venv = Lockfile; Negativtests des Lockfile-Checks (`work/campaign/stufe-a-radius.md`
+  im Hub).
 
 ## Non-Goals (vorläufig)
 

@@ -39,7 +39,11 @@ jobs:
       # pipeline red without a single line of our code changing (exactly what happened
       # on 2026-08-04). Pinned == the developer's local result == CI's result. Renovate
       # proposes bumps as PRs, so upgrading stays a deliberate, reviewed step.
-      - name: Install control-plane + tools
+      # The runtime dependencies come from the hash-pinned lockfile the .deb is built from,
+      # installed AFTER the tools so no tool can move them: pytest and mypy see exactly
+      # the versions that ship (and the ones a Renovate lockfile bump proposes), not
+      # whatever PyPI serves today. pip check: the tools still fit the locked versions.
+      - name: Install control-plane (locked dependencies) + tools
         run: |
           pip install \
             ruff==0.15.21 \
@@ -47,7 +51,10 @@ jobs:
             reuse==6.2.0 \
             pytest==9.1.1 \
             types-PyYAML==6.0.12.20260906 \
-            pytest-asyncio httpx cryptography ./controlplane
+            pytest-asyncio
+          pip install --require-hashes --only-binary :all: --no-deps -r controlplane/requirements.lock
+          pip install --no-deps ./controlplane
+          pip check
       - name: ruff check
         run: ruff check .
       - name: ruff format
@@ -64,6 +71,21 @@ jobs:
             packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm
       - name: reuse (license compliance)
         run: reuse lint
+
+  # build-deb.sh installs the lockfiles with --no-deps, so only this job notices a
+  # dependency added to pyproject.toml without re-locking, a hand-edited pin or hash, or a
+  # locked version without a wheel for the target (CPython 3.12, glibc 2.39, x86_64).
+  lockfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Lockfiles match their sources, PyPI and the target platform
+        run: |
+          pip install uv==0.12.18
+          bash scripts/check-lockfiles.sh
 
   resolve:
     runs-on: ubuntu-latest

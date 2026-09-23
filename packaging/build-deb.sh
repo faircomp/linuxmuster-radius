@@ -23,9 +23,22 @@ echo "== venv @ $VENV =="
 rm -rf "$VENV"
 mkdir -p /opt/linuxmuster-radius
 python3 -m venv "$VENV"
-"$VENV/bin/pip" install --quiet --upgrade pip
-# Pulls in cryptography (P3) as a manylinux wheel into the venv -> no extra apt Depends.
-"$VENV/bin/pip" install --quiet "$ROOT/controlplane"
+# Supply chain: every distribution in the venv comes from a lockfile that pins its
+# version AND sha256 (controlplane/*.lock, `uv pip compile --generate-hashes`, bumped by
+# Renovate PRs, checked by scripts/check-lockfiles.sh). --require-hashes: pip installs a
+# file only if its hash is in the lock. --only-binary :all:: wheels only, so no sdist is
+# built with unhashed build dependencies. --no-deps: the lock is the whole closure, pip
+# resolves nothing on its own (pip check below proves it is complete).
+LOCKED=("$VENV/bin/pip" install --quiet --require-hashes --only-binary :all: --no-deps)
+# pip itself (replaces what ensurepip bootstrapped) and setuptools, the build backend.
+"${LOCKED[@]}" -r "$ROOT/controlplane/build-requirements.lock"
+# The runtime closure; cryptography (P3) arrives as a manylinux wheel -> no extra apt Depends.
+"${LOCKED[@]}" -r "$ROOT/controlplane/requirements.lock"
+# The control plane itself: offline, built with the locked setuptools, no dependency lookup.
+"$VENV/bin/pip" install --quiet --no-index --no-build-isolation --no-deps "$ROOT/controlplane"
+"$VENV/bin/pip" check
+# setuptools was only needed to build the control plane; nothing imports it at runtime.
+"$VENV/bin/pip" uninstall --quiet --yes setuptools
 
 echo "== staging tree =="
 mkdir -p "$STAGE/opt/linuxmuster-radius" "$STAGE/lib/systemd/system" "$STAGE/DEBIAN" \

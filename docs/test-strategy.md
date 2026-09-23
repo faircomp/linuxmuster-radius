@@ -13,6 +13,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 - `ruff check` · `ruff format --check` · `mypy` · `pytest` · `shellcheck` · `reuse lint`
 - Aggregat: `bash scripts/tests/run.sh quick` (entsteht in P1/P2).
+- Lockfiles: `bash scripts/check-lockfiles.sh` (CI-Job `lockfile`; braucht `uv` und PyPI) —
+  Pins passen zu `pyproject.toml`/`build-requirements.in`, jede Prüfsumme stammt von PyPI,
+  jede Fassung hat ein Wheel für CPython 3.12/glibc 2.39/x86_64. `pytest` und `mypy` laufen
+  in CI gegen die gelockten Fassungen.
 
 ## Heavy-Tier (crabbox, Docker)
 

@@ -89,7 +89,7 @@ git-versioniert verwaltet über **REST-API + Typer-CLI**.
 | Control Plane (REST-API) | `controlplane/lmnradius/` | Python 3.11+ · FastAPI · uvicorn · **docker-py** (Container-Lifecycle) · pydantic v2 |
 | CLI | `controlplane/lmnradius/cli.py` | Python · Typer · httpx (Thin Client der REST-API) |
 | E2E / Deploy | `deploy/` | docker-compose (Samba AD DC + gejointer FreeRADIUS + `eapol_test`), Instanz-Definitionen |
-| Packaging | `packaging/` (`make deb`), `debian/changelog` | `.deb` via `packaging/build-deb.sh` (hermetisches venv unter `/opt`), gehärteter systemd-Dienst |
+| Packaging | `packaging/` (`make deb`), `debian/changelog` | `.deb` via `packaging/build-deb.sh` (hermetisches venv unter `/opt`, nur aus Hash-gepinnten Lockfiles `controlplane/*.lock`), gehärteter systemd-Dienst |
 | Tests | `scripts/tests/` | `run.sh`-Aggregator; Heavy-Tier auf **crabbox** |
 
 Details: [`docs/architecture.md`](docs/architecture.md).
