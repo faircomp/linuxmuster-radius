@@ -4,15 +4,23 @@
 
 # Self-hosted Renovate — so digest bumps work without depending on the org-level
 # Renovate/Mend GitHub App. Runs weekly and on demand. It opens PRs that bump the
-# @sha256 pins (the data-plane image DEFAULT_IMAGE via the customManager in
-# renovate.json, plus every Dockerfile / docker-compose image) — a human MUST
-# merge them (packageRules automerge:false); merging feeds a new .deb release.
+# @sha256 pins (the data-plane image DEFAULT_IMAGE, every Dockerfile / docker-compose
+# image, the lmndev-runner build image), the Python lockfiles controlplane/*.lock, the
+# action SHAs, the pinned CI tools and the Renovate engine itself — a human MUST merge
+# them (automerge is off in renovate.json); merging feeds a new .deb release.
 #
-# TOKEN: uses a RENOVATE_TOKEN repo secret (a fine-grained/classic PAT with
-# contents+pull-requests write) if present, else falls back to the built-in
-# GITHUB_TOKEN. A PAT is RECOMMENDED so the CI workflows actually run on Renovate's
-# PRs (PRs created with GITHUB_TOKEN do not trigger other workflows).
-# Every action is pinned by full commit SHA (`# vN` names the tag); Renovate bumps both.
+# ENGINE: pinned by version AND digest (renovate-version). Without it the action runs its
+# default engine (Renovate 39), which rejects `managerFilePatterns` in renovate.json, opens
+# no PR at all and still ends green -- this repo's Renovate did exactly that from 2026-07-10
+# to 2026-09-23 (issue #1). Every action is pinned by full commit SHA (`# vN` names the tag).
+#
+# TOKEN: repo secret RENOVATE_TOKEN is REQUIRED as soon as an update touches
+# .github/workflows/ (the action SHAs and the build image digest always do): GitHub never
+# lets GITHUB_TOKEN push workflow files, and PRs opened with GITHUB_TOKEN start no CI. Use a
+# fine-grained PAT limited to this repo with Contents, Pull requests, Issues and Workflows:
+# read and write. Without the secret the job falls back to GITHUB_TOKEN and warns.
+# After a change to renovate.json or this file: `gh workflow run renovate.yml -f dryRun=true`
+# and check the log for "Found renovate config errors" (the job stays green even then).
 
 name: Renovate
 
@@ -43,7 +51,13 @@ concurrency:
 jobs:
   renovate:
     runs-on: ubuntu-24.04
+    env:
+      HAS_RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN != '' }}
     steps:
+      - name: Warn when RENOVATE_TOKEN is missing
+        if: env.HAS_RENOVATE_TOKEN != 'true'
+        run: echo "::warning::RENOVATE_TOKEN is not set; Renovate cannot push changes to .github/workflows/ with GITHUB_TOKEN"
+
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -51,6 +65,7 @@ jobs:
         uses: renovatebot/github-action@f24426972367551f3391720e34317783a92fd32b # v41.0.8
         with:
           token: ${{ secrets.RENOVATE_TOKEN || github.token }}
+          renovate-version: 44.105.4@sha256:e155ebea05260c388f12afa521fc23a485f119b32b0108ed9b17616f079e7519
         env:
           RENOVATE_REPOSITORIES: ${{ github.repository }}
           RENOVATE_PLATFORM: github
