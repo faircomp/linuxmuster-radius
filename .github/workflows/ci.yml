@@ -6,6 +6,16 @@
 # container upstream CI uses (proves it builds on the target Ubuntu/Python), and an
 # install smoke on ubuntu-24.04. The heavy winbind/EAP FreeRADIUS E2E runs on crabbox,
 # not in GitHub CI.
+#
+# Supply chain (stage A, linuxmusterDEV work/plans/paketarchiv.md §2): every input of the
+# build is pinned to an immutable reference, because a released .deb vouches for everything
+# that ran in its build.
+#  * Python dependencies from hash-pinned lockfiles (controlplane/*.lock, job `lockfile`).
+#  * Build image by digest. ghcr.io/linuxmuster/lmndev-runner:<tag> is a mutable tag of
+#    another org, rebuilt every week, and the build runs as root in it; `:<tag>@sha256:<digest>`
+#    pulls exactly that image (the digest wins, the tag only tells Renovate which tag's digest
+#    to follow). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
+#    different build than the one that is released.
 name: ci
 
 on:
@@ -97,7 +107,12 @@ jobs:
       - id: image
         run: |
           DIST=$(dpkg-parsechangelog -S Distribution); NUM="${DIST#lmn}"
-          if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then IMG=ghcr.io/linuxmuster/lmndev-runner:latest; else IMG=ghcr.io/linuxmuster/lmndev-runner:24.04; fi
+          # By digest, never by tag alone (see the header); Renovate proposes the bumps.
+          if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then
+            IMG=ghcr.io/linuxmuster/lmndev-runner:latest@sha256:d735e6ccc6fd9df71b2552b06ac6f5cb4bf2d03f40e14bafe47213325b7b801b
+          else
+            IMG=ghcr.io/linuxmuster/lmndev-runner:24.04@sha256:6b0c8ac994cf1d2da44b0b36ebd7b3b125094886e78293e04b9db5e515b8209e
+          fi
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
           echo "version=$(dpkg-parsechangelog -S Version)" >> "$GITHUB_OUTPUT"
 

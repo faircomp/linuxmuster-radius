@@ -5,6 +5,16 @@
 # version and distribution come from the top entry of debian/changelog; the tag must match
 # it. No publish job yet (no faircomp/deb archive); add the upstream publish job when the
 # archive exists.
+#
+# Supply chain (stage A, linuxmusterDEV work/plans/paketarchiv.md §2): every input of the
+# build is pinned to an immutable reference, because a released .deb vouches for everything
+# that ran in its build.
+#  * Python dependencies from hash-pinned lockfiles (controlplane/*.lock, checked by ci.yml).
+#  * Build image by digest. ghcr.io/linuxmuster/lmndev-runner:<tag> is a mutable tag of
+#    another org, rebuilt every week, and the build runs as root in it; `:<tag>@sha256:<digest>`
+#    pulls exactly that image (the digest wins, the tag only tells Renovate which tag's digest
+#    to follow). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
+#    different build than the one that is released.
 name: release
 
 on:
@@ -32,7 +42,12 @@ jobs:
           TAGVER="${GITHUB_REF_NAME#v}"; TAGVER="${TAGVER//-rc/~rc}"   # v7.3.1-rc1 -> 7.3.1~rc1
           if [ "$GITHUB_REF_TYPE" = tag ] && [ "$TAGVER" != "$VERSION" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match debian/changelog version $VERSION"; exit 1; fi
-          if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then IMG=ghcr.io/linuxmuster/lmndev-runner:latest; else IMG=ghcr.io/linuxmuster/lmndev-runner:24.04; fi
+          # By digest, never by tag alone (see the header); Renovate proposes the bumps.
+          if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then
+            IMG=ghcr.io/linuxmuster/lmndev-runner:latest@sha256:d735e6ccc6fd9df71b2552b06ac6f5cb4bf2d03f40e14bafe47213325b7b801b
+          else
+            IMG=ghcr.io/linuxmuster/lmndev-runner:24.04@sha256:6b0c8ac994cf1d2da44b0b36ebd7b3b125094886e78293e04b9db5e515b8209e
+          fi
           echo "image=$IMG" >> "$GITHUB_OUTPUT"; echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   build:

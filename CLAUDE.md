@@ -49,7 +49,8 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
 - **Changelog:** one bullet in the top block of `debian/changelog` per user-visible change,
   in the same PR, written for admins in English. There is no `CHANGELOG.md`.
 - **Build:** `make deb` (wraps `packaging/build-deb.sh`; needs root, so run it in
-  `ghcr.io/linuxmuster/lmndev-runner:24.04` like CI does — the command is in the `Makefile`).
+  `ghcr.io/linuxmuster/lmndev-runner:24.04` like CI does, pinned by digest — the command is
+  in the `Makefile`; never reference the image by tag alone).
 - **Python dependencies** are locked with hashes (ADR-016): `controlplane/requirements.lock`
   (from `pyproject.toml`) and `controlplane/build-requirements.lock` (pip + setuptools).
   After changing dependencies, re-run the command in the lockfile's header inside

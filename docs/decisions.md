@@ -269,6 +269,17 @@ lehnt beide Optionen ab, deshalb prüft der CI-Job die Zielplattform in einer zw
 Auflösung). **Quelle:** pip-Doku „Secure installs" (hash-checking mode); Renovate-Quelltext
 `lib/modules/manager/pip-compile/common.ts` (erlaubte uv-Optionen, 44.93.5).
 
+### ADR-017 — Build-Eingaben unveränderlich referenziert
+**Status:** Accepted (Stufe A „Lieferkette", 2026-09-23). **Entscheidung:** Das Build-Image
+steht überall als `ghcr.io/linuxmuster/lmndev-runner:<tag>@sha256:<digest>` (ci.yml,
+release.yml und der Build-Befehl im Makefile, derselbe Digest). Renovate schlägt neue
+Digests als PR vor, ein Mensch merged; den Tag ändert Renovate nie (`24.04 → 26.04` wäre
+eine neue linuxmuster-Linie, kein Update). **Begründung:** beide Tags baut eine fremde Org
+wöchentlich neu, der Build läuft darin als root; ein still geändertes Image änderte jedes
+künftige `.deb`. **Verworfene Alternative:** eigenes Build-Image oder `ubuntu:24.04@sha256`
+mit `apt-get build-dep` (Stufe C im Hub-Plan, setzt den debian/-Umbau voraus).
+**Quelle:** Hub `work/plans/paketarchiv.md` §2.
+
 ---
 
 ## Site-Fakten zu verifizieren (P0, mit Quelle/Datum eintragen)
