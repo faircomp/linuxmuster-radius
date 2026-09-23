@@ -38,7 +38,7 @@ LOCKED=("$VENV/bin/pip" install --quiet --require-hashes --only-binary :all: --n
 # The control plane itself: built offline with the locked setuptools, then installed by name
 # from that wheel (a path install would record the build directory in direct_url.json).
 "$VENV/bin/pip" wheel --quiet --no-index --no-build-isolation --no-deps -w "$WHEELS" "$ROOT/controlplane"
-"$VENV/bin/pip" install --quiet --no-index --no-deps --find-links "$WHEELS" lmnradius
+"$VENV/bin/pip" install --quiet --no-index --only-binary :all: --no-deps --find-links "$WHEELS" lmnradius
 "$VENV/bin/pip" check
 # setuptools was only needed to build the control plane; nothing imports it at runtime.
 "$VENV/bin/pip" uninstall --quiet --yes setuptools
