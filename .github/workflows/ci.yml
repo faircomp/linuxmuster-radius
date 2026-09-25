@@ -62,6 +62,7 @@ jobs:
             reuse==6.2.0 \
             pytest==9.1.1 \
             types-PyYAML==6.0.12.20260906 \
+            uv==0.12.18 \
             pytest-asyncio
           pip install --require-hashes --only-binary :all: --no-deps -r controlplane/requirements.lock
           pip install --no-deps ./controlplane
@@ -74,6 +75,11 @@ jobs:
         run: mypy --config-file controlplane/pyproject.toml controlplane/lmnradius
       - name: pytest
         run: pytest -q controlplane/tests
+      # Tampered lockfiles (an indented URL requirement, --extra-index-url, removed or changed
+      # hashes, an extra pin, a pin without hash, ...) must fail scripts/check-lockfiles.sh AND
+      # packaging/build-venv.sh, for the expected reason. Needs uv and PyPI; never skips.
+      - name: Lockfile gates refuse tampered lockfiles
+        run: bash scripts/tests/lock_gates.sh
       - name: shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck

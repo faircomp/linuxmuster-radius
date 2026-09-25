@@ -65,6 +65,9 @@ unit(){
   else
     skip "unit" "no control-plane code yet"
   fi
+  # Tampered lockfiles must fail the lockfile check AND the venv build (needs uv + PyPI;
+  # CI runs it without the gate, so there it never skips).
+  run_step "lock gates" uv bash scripts/tests/lock_gates.sh
 }
 
 e2e(){

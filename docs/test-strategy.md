@@ -17,6 +17,15 @@ SPDX-License-Identifier: GPL-3.0-or-later
   Pins passen zu `pyproject.toml`/`build-requirements.in`, jede Prüfsumme stammt von PyPI,
   jede Fassung hat ein Wheel für CPython 3.12/glibc 2.39/x86_64. `pytest` und `mypy` laufen
   in CI gegen die gelockten Fassungen.
+- Lock-Tore: `bash scripts/tests/lock_gates.sh` (CI-Job `fast`; braucht `uv` und PyPI, überspringt
+  nie) — manipulierte Lockfiles müssen **sowohl** `check-lockfiles.sh` **als auch**
+  `packaging/build-venv.sh` (also den Paketbau) mit dem erwarteten Grund scheitern lassen:
+  eingerückte URL-Zeile (`    zzzevil @ file:///…#sha256=…`), `--extra-index-url`, entfernte
+  Hashes eines Pins, geänderter Hash (auch der eines nie geladenen sdist), zusätzlicher Pin mit
+  echten PyPI-Hashes, Pin ohne Hash; dazu je Tor (`scripts/lockfile_gate.py lint|pypi|freeze|
+  closure`) die Varianten, die pip anders liest als sie aussehen (`-i/-f/-e/-r/-c`, CR/FF/U+2028
+  in Kommentaren, Tab, NUL, Marker, Großschreibung, …). Mit `LOCK_GATES_DEB=1` im Build-Image
+  zusätzlich der ganze `make deb` je Fall (muss ohne `.deb` scheitern).
 
 ## Heavy-Tier (crabbox, Docker)
 
