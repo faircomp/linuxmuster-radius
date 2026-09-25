@@ -11,8 +11,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${1:?usage: build-venv.sh <venv directory>}"
+GATE="$ROOT/scripts/lockfile_gate.py"
+LOCKS=("$ROOT/controlplane/build-requirements.lock" "$ROOT/controlplane/requirements.lock")
 WHEELS="$(mktemp -d)"
 trap 'rm -rf "$WHEELS"' EXIT
+die() { echo "build-venv.sh: $*" >&2; exit 1; }
+
+# Before pip reads a lockfile. (1) Every line is one uv writes: pip would also honour an
+# indented URL requirement, an --extra-index-url line and every other option line, and a
+# check that reads only some lines lets them through. (2) Every hash is one PyPI publishes
+# for that exact version: pip compares only the hash of the file it downloads, so a
+# replaced hash of any other file (the sdist, another platform's wheel) would pass pip.
+echo "== lockfiles =="
+python3 -I -B "$GATE" lint "${LOCKS[@]}" || die "a lockfile holds a line uv does not write"
+python3 -I -B "$GATE" pypi "${LOCKS[@]}" || die "a lockfile hash is not a file PyPI publishes"
 
 echo "== venv @ $VENV =="
 rm -rf "$VENV"
@@ -36,14 +48,13 @@ LOCKED=("$VENV/bin/pip" install --quiet --require-hashes --only-binary :all: --n
 "$VENV/bin/pip" check
 # setuptools was only needed to build the control plane; nothing imports it at runtime.
 "$VENV/bin/pip" uninstall --quiet --yes setuptools
-# The venv holds exactly the lockfiles, nothing else (names PEP 503-normalised on both sides).
-norm() {
-    "$VENV/bin/python" -c 'import re, sys
-for line in sys.stdin:
-    name, version = line.split()[0].split("==")
-    print(re.sub(r"[-_.]+", "-", name).lower() + "==" + version)' | LC_ALL=C sort
-}
-diff -u <(grep -hE '^[A-Za-z0-9]' "$ROOT/controlplane/requirements.lock" \
-              "$ROOT/controlplane/build-requirements.lock" | grep -v '^setuptools==' | norm) \
-        <("$VENV/bin/pip" freeze --all --exclude lmnradius | norm)
-
+# The venv holds exactly the lockfiles plus the control plane, nothing else, and every
+# distribution in it is needed by the control plane or pip. Every step writes a file or
+# returns its own status, checked right here: no pipeline, no process substitution, so an
+# error anywhere (a crash included) fails the build.
+FREEZE="$WHEELS/freeze.txt"
+"$VENV/bin/pip" freeze --all > "$FREEZE" || die "pip freeze failed"
+python3 -I -B "$GATE" freeze --own lmnradius --drop setuptools "$FREEZE" "${LOCKS[@]}" \
+    || die "the venv differs from the lockfiles"
+"$VENV/bin/python" -I -B "$GATE" closure --root lmnradius --root pip \
+    || die "the venv holds a distribution that nothing requires"

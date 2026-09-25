@@ -259,6 +259,19 @@ aus `build-requirements.in`). `packaging/build-venv.sh` installiert sie mit `--r
 --no-build-isolation`) und installiert es per Namen (kein Build-Pfad in `direct_url.json`),
 prüft mit `pip check`, entfernt setuptools wieder und bricht ab, wenn `pip freeze --all`
 nicht exakt den Lockfiles entspricht.
+Seit 7.3.4 (kalte Prüfung von Stufe A, Befund F2) liest der Bau die Lockfiles nicht mehr
+ungeprüft: `scripts/lockfile_gate.py` lässt vor pip nur Zeilen zu, die uv schreibt (leer,
+Kommentar, `name==version \`, `    --hash=sha256:<64 hex>`, nur druckbares ASCII) — pip liest
+auch eingerückte Zeilen, URL-Anforderungen (`name @ url#sha256=…` erfüllt `--require-hashes`)
+und Optionszeilen wie `--extra-index-url`, und `str.splitlines()` trennt auch an CR/FF/U+2028;
+eine eingerückte URL-Zeile hatte die alte Prüfung (nur Spalte 1) passiert und landete im
+`.deb`. Jede Prüfsumme muss eine sein, die PyPI für genau diese Fassung veröffentlicht (pip
+prüft nur die der geladenen Datei). Nach der Installation vergleicht der Bau `pip freeze
+--all` Zeile für Zeile mit den Lockfiles (jede Zeile ein schlichtes `name==version`, jeder
+Fehler bricht ab, keine Prozess-Substitution mehr, die eine Ausnahme verschluckt) und
+verlangt, dass jede installierte Distribution von `lmnradius` oder pip gebraucht wird (ein
+zusätzlicher Pin mit echten Hashes fiele sonst durch). `scripts/tests/lock_gates.sh`
+(Fast-Tier) hält die Fälle dauerhaft fest.
 `scripts/check-lockfiles.sh` (CI-Job `lockfile`) beweist, dass die Lockfiles zu ihren
 Quellen passen (eine Fassung jünger als sieben Tage fällt dabei durch), jede Prüfsumme eine
 von PyPI für genau diese Fassung ist und jede Fassung ein Wheel für die Zielplattform hat

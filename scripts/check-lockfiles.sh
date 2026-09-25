@@ -5,6 +5,14 @@
 # Proves that the hash-pinned lockfiles under controlplane/ still match their sources and
 # the target platform. packaging/build-venv.sh installs them with --no-deps, so nothing
 # else would notice a dependency added to pyproject.toml without re-locking.
+#   0. Every line is one pip reads exactly the way uv wrote it: empty, a comment, a
+#      `name==version \` pin or a `    --hash=sha256:<64 hex>` line continuing it, in
+#      printable ASCII (scripts/lockfile_gate.py lint). pip also reads indented lines, URL
+#      requirements and option lines such as --extra-index-url; an indented
+#      `name @ file:///...whl#sha256=...` passed the column-1 greps this script used up to
+#      7.3.3. Nothing else is checked (and no uv runs on the file) until this passes.
+#      `check-lockfiles.sh --lint [LOCK...]` runs only this step, without uv or network;
+#      build-venv.sh runs it before pip reads a lockfile.
 #   1. The header records the canonical command (the one Renovate re-runs on a bump).
 #      --exclude-newer=P7D: only releases that have been on PyPI for at least a week, the
 #      window in which a compromised upload is usually noticed and yanked.
@@ -24,9 +32,23 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GATE="$ROOT/scripts/lockfile_gate.py"
+LOCKS=("$ROOT/controlplane/requirements.lock" "$ROOT/controlplane/build-requirements.lock")
+
+if [ "${1:-}" = --lint ]; then
+    shift
+    [ "$#" -gt 0 ] || set -- "${LOCKS[@]}"
+    exec python3 -I -B "$GATE" lint "$@"
+fi
+if ! python3 -I -B "$GATE" lint "${LOCKS[@]}"; then
+    echo "FAIL lockfile grammar (above); nothing else is checked until it is fixed"
+    exit 1
+fi
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Exact after step 0: a pin starts in column 1, its hashes follow on indented lines.
 pins() { grep -E '^[A-Za-z0-9]' "$1" | cut -d' ' -f1 | sort; }
 hashes() { awk '/^[A-Za-z0-9]/ { pin = $1 } /--hash=/ { print pin, $1 }' "$1" | sort; }
 

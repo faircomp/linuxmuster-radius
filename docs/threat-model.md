@@ -61,7 +61,13 @@ SPDX-License-Identifier: GPL-3.0-or-later
   entsteht nur aus `controlplane/requirements.lock` und `build-requirements.lock` (Version
   und sha256 je Datei, nur Fassungen, die mindestens eine Woche auf PyPI liegen, `--require-hashes --only-binary :all: --no-deps`, eigenes Paket
   offline), danach `pip check`, und der Bau bricht ab, wenn das venv nicht exakt den
-  Lockfiles entspricht; der CI-Job `lockfile` prüft die Lockfiles gegen
+  Lockfiles entspricht. **Nachgehärtet (7.3.4):** bis 7.3.3 passierte eine eingerückte
+  `name @ file:///…whl#sha256=…`-Zeile die Lockfile-Prüfung, und der venv-Abgleich stürzte in
+  einer Prozess-Substitution ab, ohne den Bau anzuhalten — das fremde Paket lag im `.deb`
+  (kalte Prüfung Stufe A, F2). Jetzt lassen Prüfung und Bau nur Zeilen zu, die uv schreibt,
+  der Bau prüft jede Prüfsumme gegen PyPI, vergleicht `pip freeze` fehlerfest und verlangt,
+  dass jede Distribution im venv gebraucht wird; `scripts/tests/lock_gates.sh` hält die Fälle
+  fest; der CI-Job `lockfile` prüft die Lockfiles gegen
   `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per Renovate-PR, den
   ein Mensch merged (ADR-016). Das Build-Image (`lmndev-runner`, fremde Org, wöchentlich
   neu gebaut, Build als root) steht per Digest, jede Action per Commit-SHA; das Release
