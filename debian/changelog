@@ -12,15 +12,21 @@ linuxmuster-radius (7.3.4) lmn73; urgency=medium
     like any other version.
   * Depends on python3 (>= 3.12) and python3 (<< 3.13) instead of
     python3 (>= 3.12): the environment under /opt/linuxmuster-radius/venv is
-    built for the Python 3.12 of Ubuntu 24.04. On a distribution upgrade to
-    a newer Python, apt now holds the package back instead of leaving a
-    broken service. The compiled libraries add libc6 and libgcc-s1.
+    built for the Python 3.12 of Ubuntu 24.04. A plain "apt upgrade" then
+    keeps the package back instead of leaving a broken service on a newer
+    Python; a full distribution upgrade ("apt full-upgrade", do-release-
+    upgrade) removes it instead, leaving its configuration and state in
+    place, so it can be reinstalled once a matching build exists. The
+    compiled libraries add libc6 and libgcc-s1.
   * Hardened dependency checks. The lockfile check and the build now read
-    every line of the lockfiles the way pip does and refuse anything but
+    every line of both lockfiles the way pip does and refuse anything but
     pinned versions with their SHA-256 hashes; an indented or URL
     requirement and option lines such as --extra-index-url used to pass the
-    check. The build also verifies every hash against PyPI and stops if the
-    installed environment differs in any way from the lockfiles.
+    check. The build also verifies every hash against PyPI and, before it
+    installs anything, that the pins are exactly the resolved closure of the
+    declared dependencies -- an extra package slipped into either lockfile,
+    even with a genuine hash, stops the build before its code can run -- and
+    it re-checks the finished environment against the lockfiles.
   * The post-installation script turns off git's background maintenance in
     the instance change log (/var/lib/linuxmuster-radius/instances) and no
     longer lets git look into /root/.config when XDG_CONFIG_HOME is
