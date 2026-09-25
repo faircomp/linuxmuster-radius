@@ -546,8 +546,14 @@ jobs:
           # thing that restarts it is `systemctl try-restart` inside the postinst's
           # `if [ -n "${2:-}" ]` branch, which exists only when dpkg passes an old version.
           grep -qE 'Unpacking linuxmuster-radius \([^)]+\) over \([^)]+\)' upgrade.log
-          # dpkg's own record of the action, independent of apt's wording.
-          grep -q ' upgrade linuxmuster-radius:' /var/log/dpkg.log
+          # dpkg's own record of the action, independent of apt's wording: exactly this
+          # step, from the released version to the built one (a reinstall of an equal version
+          # is logged as an upgrade too), and never a downgrade (--allow-downgrades above
+          # would let one through, and dpkg logs it as "upgrade" as well).
+          old_ver="$(dpkg-deb -f previous/*.deb Version)"
+          new_ver="$(dpkg-deb -f packages/*.deb Version)"
+          dpkg --compare-versions "$new_ver" ge "$old_ver"
+          grep -E " upgrade linuxmuster-radius:(all|amd64) ${old_ver//./\\.} ${new_ver//./\\.}\$" /var/log/dpkg.log
           after_pid="$(systemctl show -p MainPID --value linuxmuster-radius.service)"
           echo "postinst upgrade branch ran: MainPID $before_pid -> $after_pid"
           test "$before_pid" != "$after_pid"
