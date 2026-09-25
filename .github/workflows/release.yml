@@ -71,18 +71,143 @@ jobs:
       options: --user root
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Build package (make deb wraps packaging/build-deb.sh)
+      - name: Build package (make deb = dpkg-buildpackage; build deps via build-dep)
         run: |
-          # No debian/control at the root yet (that is the debian/ conversion PR), so
-          # install what build-deb.sh needs by hand instead of `apt-get build-dep`.
-          apt-get update -qq && apt-get install -y -qq python3-venv
+          apt-get update -qq && apt-get build-dep -y -qq .
           make deb
-          mkdir -p output && mv ./linuxmuster-radius_*.deb output/
+          # dpkg-buildpackage writes one level above the source tree. The .dsc and the
+          # source tarball go along because the .changes lists them with their checksums.
+          mkdir -p output && mv ../*.deb ../*.changes ../*.buildinfo ../*.dsc ../*.tar.xz output/
+          dpkg-deb -I output/*.deb
+          # DEBIAN/md5sums must cover every shipped file, or `dpkg --verify` is a no-op.
+          dpkg-deb --ctrl-tarfile output/*.deb | tar -tf - | grep -qx './md5sums'
+          test "$(dpkg-deb -c output/*.deb | grep -c '^-')" = "$(dpkg-deb --ctrl-tarfile output/*.deb | tar -xOf - ./md5sums | wc -l)"
+          echo "md5sums: $(dpkg-deb --ctrl-tarfile output/*.deb | tar -xOf - ./md5sums | wc -l) files"
+      - name: Lintian (the .deb only)
+        run: |
+          # Never lint the .changes: `lmn73` is not a distribution lintian knows, so it would
+          # fail every build with E: bad-distribution-in-changes-file.
+          lintian --fail-on error output/*.deb
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages
           path: output/
           if-no-files-found: error
+
+  # The one failure mode of a packaging change that no other job would notice: a module of
+  # the control plane, the unit or the CLI link quietly falls out of the package, or a mode
+  # changes (dh_fixperms would make the wheels' .so files 0644), because debian/rules places
+  # things differently than the old hand-rolled dpkg-deb build. It would only show up on a
+  # school server. So every build is compared, path by path, against the newest published
+  # release: a path that disappears or changes mode/owner fails the build. Two venv rules:
+  # the own lmnradius-<version>.dist-info is compared under a fixed name, and a third-party
+  # path under site-packages that disappears (a lock bump) is reported, not failed -- the
+  # completeness of those is proven by `debian/venv-relocate --verify` (RECORD) and the
+  # freeze == lock gates of the build. This gate is permanent, and release.yml carries the
+  # same job (the run blocks are character-identical).
+  file-tree:
+    needs: build
+    runs-on: ubuntu-latest        # GitHub-hosted: gh is installed here, not in the container
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: packages
+          path: packages/
+      - name: Fetch the newest published release
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          mkdir -p previous
+          # Prefer the newest real release, fall back to the newest prerelease. Skipping is
+          # only legitimate when the repo has NO release at all: this gate stands between a
+          # silently shrunk package and a school server.
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+                  --json tagName,isDraft,isPrerelease \
+                  --jq '[.[] | select(.isDraft == false and .isPrerelease == false)][0].tagName // ""')
+          if [ -z "$tag" ]; then
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+                    --json tagName,isDraft --jq '[.[] | select(.isDraft == false)][0].tagName // ""')
+            [ -n "$tag" ] && echo "::warning::no full release yet, comparing against prerelease $tag"
+          fi
+          if [ -z "$tag" ]; then
+            if [ "$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq 'length')" != "0" ]; then
+              echo "::error::releases exist but none could be selected - refusing to skip"; exit 1
+            fi
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "::notice::first release of this package, nothing to compare against"
+            exit 0
+          fi
+          for i in 1 2 3; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' --dir previous && break
+            echo "download attempt $i failed, retrying"; sleep 10
+          done
+          test -n "$(ls previous/*.deb 2>/dev/null)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Compare the file tree with the released package
+        if: steps.prev.outputs.skip != '1'
+        env:
+          PREV_TAG: ${{ steps.prev.outputs.tag }}
+        run: |
+          set -euo pipefail          # without pipefail `tee` would swallow the exit code
+          # mode owner path, sorted. Directories are compared too, so an emptied or lost
+          # directory cannot go unnoticed. A symlink prints "path -> target"; the target is
+          # carried along, so a retargeted link (/usr/bin/lmnradius, the venv's python and
+          # lib64 links) is drift too.
+          norm() { dpkg-deb -c "$1" | awk '{t = ($7 == "->" ? " " $7 " " $8 : ""); print $1, $2, $6 t}' | LC_ALL=C sort; }
+          norm previous/*.deb > old.txt
+          norm packages/*.deb > new.txt
+          python3 - old.txt new.txt linuxmuster-radius lmnradius "$PREV_TAG" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import re
+          import sys
+
+          old_f, new_f, PKG, OWN, TAG = sys.argv[1:6]
+          SP = rf"opt/{PKG}/venv/lib/python3\.12/site-packages/"
+          # 1. the own dist-info carries the version: compare it under a fixed name.
+          DIST = re.compile(rf"^({SP}{OWN})-[^/]+\.dist-info")
+          # 2. third-party distributions come and go with every lock bump; their completeness
+          #    is proven by `debian/venv-relocate --verify` (RECORD) and the freeze == lock
+          #    gates of the build, so a path of theirs that disappears is reported, not failed.
+          #    Mode/owner is checked everywhere.
+          THIRD = re.compile(rf"^{SP}(?!{OWN}[/-])")
+          # Paths that may legitimately disappear. Add one ONLY together with the changelog
+          # sentence that explains it to admins.
+          ALLOW_GONE = set()
+
+
+          def read(name):
+              rows = {}
+              for line in open(name):
+                  mode, owner, path = line.rstrip("\n").split(" ", 2)
+                  if path == "./":  # the package root: dpkg never applies its mode
+                      continue
+                  rows[DIST.sub(r"\1-VERSION.dist-info", path.removeprefix("./"))] = (mode, owner)
+              return rows
+
+
+          old, new = read(old_f), read(new_f)
+          gone = sorted(set(old) - set(new))
+          added = sorted(set(new) - set(old))
+          changed = sorted(p for p in set(old) & set(new) if old[p] != new[p])
+          strict_gone = [p for p in gone if not THIRD.match(p) and p not in ALLOW_GONE]
+          print(f"## File tree vs {TAG}\n")
+          print(f"- released: {len(old)} entries, built: {len(new)} entries")
+          print(f"- third-party venv paths: {sum(1 for p in gone if THIRD.match(p))} gone, "
+                f"{sum(1 for p in added if THIRD.match(p))} added (lock changes, see RECORD check)")
+          for p in added:
+              if not THIRD.match(p):
+                  print(f"- added: `{p}`")
+          for p in strict_gone:
+              print(f"::error::file lost from the package: {p}")
+          for p in changed:
+              print(f"::error::mode or owner changed: {p}: {old[p]} -> {new[p]}")
+          if strict_gone or changed:
+              sys.exit(1)
+          print("\nfile tree: nothing lost, no mode or owner change")
+          PY
 
   install-smoke:
     needs: build
@@ -367,7 +492,7 @@ jobs:
         run: sudo journalctl -u linuxmuster-radius.service --no-pager | tail -60 || true
 
   release:
-    needs: [gate, build, install-smoke, upgrade-smoke]
+    needs: [gate, build, file-tree, install-smoke, upgrade-smoke]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -391,9 +516,10 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # .changes/.buildinfo join the assets with the debian/ conversion (dpkg-buildpackage).
-          assets=(packages/*.deb)
-          [ "${#assets[@]}" -gt 0 ] || { echo "::error::no .deb to publish"; exit 1; }
+          # The .deb and the source package: the .changes lists the .dsc, the source tarball and
+          # the .buildinfo with their checksums, so all of them go along.
+          assets=(packages/*.deb packages/*.changes packages/*.buildinfo packages/*.dsc packages/*.tar.*)
+          compgen -G 'packages/*.deb' > /dev/null || { echo "::error::no .deb to publish"; exit 1; }
           # GitHub renames special characters in asset names (`~` becomes `.`, `+` stays), so
           # names are compared in this normalised form, in which no two assets may collide.
           norm() { local n=${1##*/}; printf '%s\n' "${n//[^A-Za-z0-9._-]/.}"; }
