@@ -24,8 +24,20 @@ SPDX-License-Identifier: GPL-3.0-or-later
   Hashes eines Pins, geänderter Hash (auch der eines nie geladenen sdist), zusätzlicher Pin mit
   echten PyPI-Hashes, Pin ohne Hash; dazu je Tor (`scripts/lockfile_gate.py lint|pypi|freeze|
   closure`) die Varianten, die pip anders liest als sie aussehen (`-i/-f/-e/-r/-c`, CR/FF/U+2028
-  in Kommentaren, Tab, NUL, Marker, Großschreibung, …). Mit `LOCK_GATES_DEB=1` im Build-Image
-  zusätzlich der ganze `make deb` je Fall (muss ohne `.deb` scheitern).
+  in Kommentaren, Tab, NUL, Marker, Großschreibung, …). Dazu die K1-Fälle: ein Wheel mit
+  `bin/`-Skripten und einer Marker-schreibenden `.pth`, als echter Pin (Name und Hash echt,
+  Veröffentlichung nur in der Wegwerfkopie simuliert) in der Build-Sperrdatei (Variante 1) oder
+  in beiden (Variante 2) — die Mengen-/Hüllen-Prüfung muss ihn abweisen, **bevor** ein
+  Sperrdatei-Wheel entpackt wird. Mit `LOCK_GATES_DEB=1` im Build-Image zusätzlich der ganze
+  `make deb` je Fall (CI-Job `lock-gates-build`): muss ohne `.deb` scheitern, und bei den
+  K1-Fällen darf die Markerdatei **nicht** entstehen (die `.pth` lief nie).
+- K1-Regel (`work/tasks/nachbesserung-kalte-pruefung-umbau.md`): vor jedem Programm/Interpreter
+  aus einem Sperrdatei-venv und bevor dessen `bin/` im PATH steht, sind beide Sperrdateien voll
+  geprüft (Grammatik, jeder Hash von PyPI, Pins = Hülle der Eingaben). `packaging/build-venv.sh`
+  installiert dazu `uv` hash-gepinnt aus `controlplane/uv-requirements.lock` (nur `uv`, per
+  absolutem Pfad, isoliert) und lässt es `check-lockfiles.sh` die Hülle prüfen, alles **vor**
+  dem venv. `uv` kommt überall (fast tier, `lockfile`, Bau) aus dieser Datei, nie aus einem
+  ungepinnten `pip install uv==…`.
 
 ## Heavy-Tier (crabbox, Docker)
 

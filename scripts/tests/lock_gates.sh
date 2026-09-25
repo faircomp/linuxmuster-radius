@@ -81,6 +81,12 @@ PY
 expect ok "lint: the committed lockfiles" "" bash "$ROOT/scripts/check-lockfiles.sh" --lint
 expect ok "pypi: every committed hash is published" "" python3 -I -B "$GATE" pypi \
     "$ROOT/controlplane/build-requirements.lock" "$LOCK"
+# The full set-closure of the COMMITTED files, not only their grammar: an extra real pin that
+# an author (or an attacker with commit access) left in a lock is caught here in the fast tier,
+# not only by the ci `lockfile` job and the build (cold verification of the debian umbau,
+# finding 4). Needs uv and PyPI.
+expect ok "closure: the committed lockfiles are the closure of their inputs" "" \
+    bash "$ROOT/scripts/check-lockfiles.sh"
 
 # ---------------------------------------------------------------- the F2 matrix
 # Each case edits controlplane/requirements.lock in a copy of the files both scripts read.
@@ -113,7 +119,9 @@ EDIT[extra-pin]="lines[-1:-1] = ['six==1.16.0 \\\\',
     '    --hash=sha256:1e61c37477a1626458e36f7b1d82aa5c9b094fa4802892072e49de9c60c4c926 \\\\',
     '    --hash=sha256:8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254']"
 CHECK_WHY[extra-pin]="pins differ from a fresh"
-BUILD_WHY[extra-pin]="six==1\.16\.0 is installed but required by nothing"
+# build-venv.sh now runs the set-closure BEFORE it populates the venv (K1), so an extra pin is
+# rejected there, earlier than the post-install closure gate.
+BUILD_WHY[extra-pin]="pins differ from a fresh|not the closure of its declared inputs"
 EDIT[pin-without-hash]="lines.insert(-1, 'six==1.16.0')"
 CHECK_WHY[pin-without-hash]="not an empty line, a comment"
 BUILD_WHY[pin-without-hash]="not an empty line, a comment"
@@ -137,6 +145,98 @@ for c in indented-url extra-index-url hashes-removed hash-changed extra-pin pin-
         fi
     fi
 done
+
+# ------------------------------------------------ K1: a lock wheel must not run before the gate
+# The attack of the cold verification (work/verification/cold-debian-squid.md F1,
+# nachbesserung-kalte-pruefung-umbau.md K1): a wheel whose distribution ships bin/ scripts
+# (diff, comm, ... that could shadow the check tools if a lock venv's bin/ were on PATH) and a
+# `.pth` that runs in every interpreter of the venv it is installed into. Pinned in the BUILD
+# lock (variant 1) or in both locks (variant 2) with a REAL name and hash, it passes grammar
+# and the PyPI-hash check; only the set==closure check can stop it, and it must stop it BEFORE
+# any lock wheel is unpacked, so the .pth never runs while lmnradius's own wheel is built.
+# The wheel is crafted here (self-contained, permanent) and its "publication on PyPI" is
+# simulated only inside the throwaway copy, by monkeypatching that copy's lockfile_gate
+# published(); the repo's real build path is untouched, so real builds are not weakened.
+MARK="$TMP/k1-marker"
+WHEELDIR="$TMP/k1-wheel"
+mkdir -p "$WHEELDIR"
+python3 - "$WHEELDIR" "$MARK" <<'PY'
+import base64, hashlib, sys, zipfile
+out, marker = sys.argv[1:3]
+pth = ("import os; open(%r,'a').write('pth ran in pid %%d\\n' %% os.getpid())\n" % marker)
+files = {"zzzk1/__init__.py": "", "zzzk1.pth": pth,
+         "zzzk1-1.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: zzzk1\nVersion: 1.0\n",
+         "zzzk1-1.0.dist-info/WHEEL": "Wheel-Version: 1.0\nGenerator: t\nRoot-Is-Purelib: true\nTag: py3-none-any\n"}
+for t in "diff comm sort awk grep cut cp python3 uv".split():
+    files["zzzk1-1.0.data/scripts/" + t] = "#!/bin/sh\necho \"bin/%s ran: $*\" >> %s\nexit 0\n" % (t, marker)
+rec = []
+for n, txt in files.items():
+    d = txt.encode(); h = base64.urlsafe_b64encode(hashlib.sha256(d).digest()).rstrip(b"=").decode()
+    rec.append("%s,sha256=%s,%d" % (n, h, len(d)))
+rec.append("zzzk1-1.0.dist-info/RECORD,,")
+files["zzzk1-1.0.dist-info/RECORD"] = "\n".join(rec) + "\n"
+p = out + "/zzzk1-1.0-py3-none-any.whl"
+with zipfile.ZipFile(p, "w") as z:
+    for n, txt in files.items():
+        info = zipfile.ZipInfo(n, (2026, 1, 1, 0, 0, 0))
+        info.external_attr = (0o755 if "/scripts/" in n else 0o644) << 16
+        z.writestr(info, txt)
+print(hashlib.sha256(open(p, "rb").read()).hexdigest())
+PY
+K1_HASH="$(sha256sum "$WHEELDIR"/*.whl | cut -d' ' -f1)"
+
+# k1_case <label> <build|both>: pin zzzk1 in the build lock (and, for "both", the runtime lock)
+# of a copy, simulate its PyPI publication in that copy, then assert the set-closure check
+# rejects it. Under LOCK_GATES_DEB, also assert `make deb` fails, ships no .deb and, above all,
+# leaves NO marker: the .pth never ran.
+k1_case() {
+    local label="$1" where="$2"
+    local dir="$TMP/k1-$label"
+    rm -rf "$dir"; mkdir -p "$dir/debian"
+    cp -r "$ROOT/controlplane" "$ROOT/packaging" "$ROOT/scripts" "$dir/"
+    cp "$ROOT/debian/changelog" "$dir/debian/"
+    local block="zzzk1==1.0 \\
+    --hash=sha256:$K1_HASH
+    # via -r build-requirements.in"
+    printf '%s\n' "$block" >> "$dir/controlplane/build-requirements.lock"
+    [ "$where" = both ] && printf '%s\n' "${block/-r build-requirements.in/lmnradius (pyproject.toml)}" \
+        >> "$dir/controlplane/requirements.lock"
+    # simulate "zzzk1 1.0 is on PyPI with this hash" in the copy only
+    python3 - "$dir/scripts/lockfile_gate.py" "$K1_HASH" <<'PY'
+import sys
+p, h = sys.argv[1:3]
+s = open(p).read(); i = s.index('if __name__ == "__main__":')
+s = s[:i] + ("_real_pub = published\n\n\ndef published(pin):\n"
+             "    return {%r} if pin.name == 'zzzk1' else _real_pub(pin)\n\n\n" % h) + s[i:]
+open(p, "w").write(s)
+PY
+    # the set-closure check (grammar and PyPI-hash pass; only closure can stop it)
+    expect fail "K1 check: $label" "pins differ from a fresh" \
+        bash "$dir/scripts/check-lockfiles.sh"
+    if [ -n "${LOCK_GATES_DEB:-}" ]; then
+        local src="$TMP/k1-deb-$label/src"
+        mkdir -p "$src"
+        tar -C "$ROOT" --exclude=./.git -cf - . | tar -C "$src" -xf -
+        cp "$dir/controlplane/build-requirements.lock" "$src/controlplane/"
+        cp "$dir/controlplane/requirements.lock" "$src/controlplane/"
+        cp "$dir/scripts/lockfile_gate.py" "$src/scripts/"
+        rm -f "$MARK"
+        expect fail "K1 make deb: $label" "not the closure of its declared inputs" \
+            env PIP_FIND_LINKS="$WHEELDIR" make -C "$src" deb
+        if compgen -G "$TMP/k1-deb-$label/"'*.deb' > /dev/null; then
+            echo "WRONG K1 make deb: $label left a .deb behind"; FAIL=$((FAIL + 1))
+        fi
+        if [ -e "$MARK" ]; then
+            echo "WRONG K1 make deb: $label ran the wheel's .pth/bin (marker: $(wc -l < "$MARK") lines)"
+            FAIL=$((FAIL + 1))
+        else
+            echo "ok    K1 make deb: $label built no .deb and the .pth never ran"
+            PASS=$((PASS + 1))
+        fi
+    fi
+}
+k1_case build-lock-only build
+k1_case both-locks both
 
 # ---------------------------------------------------------------- lint, line by line
 # Everything pip would read differently from a plain uv pin. Appended to a copy of the lock.
