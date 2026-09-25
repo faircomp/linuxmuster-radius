@@ -1,3 +1,39 @@
+linuxmuster-radius (7.3.4) lmn73; urgency=medium
+
+  * The package is now built with debhelper (dpkg-buildpackage) instead of a
+    hand-written script. It installs the same files with the same
+    permissions as 7.3.3; the service, the CLI, the configuration and the
+    upgrade path behave exactly as before. New are only the files
+    /usr/share/doc/linuxmuster-radius/changelog.gz and copyright and the
+    package's lintian overrides.
+  * Architecture is now amd64 instead of all: the bundled Python environment
+    contains compiled x86_64 libraries, so the package never worked on other
+    architectures. apt upgrades an installed 7.3.x (all) to 7.3.4 (amd64)
+    like any other version.
+  * Depends on python3 (>= 3.12) and python3 (<< 3.13) instead of
+    python3 (>= 3.12): the environment under /opt/linuxmuster-radius/venv is
+    built for the Python 3.12 of Ubuntu 24.04. On a distribution upgrade to
+    a newer Python, apt now holds the package back instead of leaving a
+    broken service. The compiled libraries add libc6 and libgcc-s1.
+  * Hardened dependency checks. The lockfile check and the build now read
+    every line of the lockfiles the way pip does and refuse anything but
+    pinned versions with their SHA-256 hashes; an indented or URL
+    requirement and option lines such as --extra-index-url used to pass the
+    check. The build also verifies every hash against PyPI and stops if the
+    installed environment differs in any way from the lockfiles.
+  * The post-installation script turns off git's background maintenance in
+    the instance change log (/var/lib/linuxmuster-radius/instances) and no
+    longer lets git look into /root/.config when XDG_CONFIG_HOME is
+    inherited from the installing admin. A precaution taken over from
+    linuxmuster-squid 7.3.4, whose configuration failed on such a
+    maintenance process.
+  * The release job fails unless GitHub marks the published release
+    immutable, so the files of a release cannot be replaced unnoticed. A
+    release also carries the source package (.dsc, source tarball, .changes,
+    .buildinfo).
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Fri, 25 Sep 2026 11:55:45 +0200
+
 linuxmuster-radius (7.3.3) lmn73; urgency=medium
 
   * Reproducible builds with verified dependencies: the Python environment
