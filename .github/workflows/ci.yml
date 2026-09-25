@@ -67,8 +67,10 @@ jobs:
             reuse==6.2.0 \
             pytest==9.1.1 \
             types-PyYAML==6.0.12.20260906 \
-            uv==0.12.18 \
             pytest-asyncio
+          # uv is the lock gates' resolver; install it hash-pinned from a file that holds only
+          # uv (K1), never a bare `pip install uv==...` that trusts whatever hash PyPI serves.
+          pip install --require-hashes --only-binary :all: --no-deps -r controlplane/uv-requirements.lock
           pip install --require-hashes --only-binary :all: --no-deps -r controlplane/requirements.lock
           pip install --no-deps ./controlplane
           pip check
@@ -113,8 +115,8 @@ jobs:
           python-version: "3.12"
       - name: Lockfiles match their sources, PyPI and the target platform
         run: |
-          pip install \
-            uv==0.12.18
+          # uv hash-pinned from the uv-only lock (K1), not a bare `pip install uv==...`.
+          pip install --require-hashes --only-binary :all: --no-deps -r controlplane/uv-requirements.lock
           bash scripts/check-lockfiles.sh
 
   resolve:
@@ -167,6 +169,32 @@ jobs:
           name: packages
           path: output/
           if-no-files-found: error
+
+  # The lock gates through a real `make deb` in the pinned image, as the build user. Proves K1
+  # end to end: a wheel pinned in the build lock (or both locks) whose distribution ships bin/
+  # scripts and a marker-writing .pth -- with a real name and hash, its "publication" simulated
+  # only in the throwaway copy -- is rejected by the set-closure check BEFORE the venv is
+  # populated, so `make deb` fails, ships no .deb, and the .pth never runs (the marker stays
+  # absent). The fast tier runs the same script without --build.
+  lock-gates-build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.resolve.outputs.image }}
+      options: --user root
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Every manipulated lock stops make deb, and no lock wheel runs first
+        run: |
+          apt-get update -qq && apt-get build-dep -y -qq .
+          # The image ships no pip; build-dep installs python3-venv. uv (the resolver
+          # lock_gates.sh runs directly) comes hash-pinned from the uv-only lock, into an
+          # isolated venv put on PATH (K1). make deb inside the test installs its own uv again.
+          python3 -m venv /uv
+          /uv/bin/pip install --require-hashes --only-binary :all: --no-deps -r controlplane/uv-requirements.lock
+          chown -R build:build .
+          runuser -u build -- env HOME=/home/build PATH="/uv/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            LOCK_GATES_DEB=1 LOCK_GATES_VERBOSE=1 bash scripts/tests/lock_gates.sh
 
   # The one failure mode of a packaging change that no other job would notice: a module of
   # the control plane, the unit or the CLI link quietly falls out of the package, or a mode

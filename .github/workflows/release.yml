@@ -71,6 +71,24 @@ jobs:
           fi
           echo "image=$IMG" >> "$GITHUB_OUTPUT"; echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+  # The build refuses a malformed lock, an unpublished hash and any venv drift on its own, but
+  # the P7D age rule and "the lock is the closure of pyproject.toml / build-requirements.in"
+  # are proven by re-resolving with uv. In ci.yml the `lockfile` job does that; here it is a
+  # release gate (release needs it), so a tag cannot be published while a lock drifted from its
+  # inputs (cold verification of the debian umbau, finding 5).
+  lockfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Lockfiles match their sources, PyPI and the target platform
+        run: |
+          # uv hash-pinned from the uv-only lock (K1), not a bare `pip install uv==...`.
+          pip install --require-hashes --only-binary :all: --no-deps -r controlplane/uv-requirements.lock
+          bash scripts/check-lockfiles.sh
+
   build:
     needs: gate
     runs-on: ubuntu-latest
@@ -500,7 +518,7 @@ jobs:
         run: sudo journalctl -u linuxmuster-radius.service --no-pager | tail -60 || true
 
   release:
-    needs: [gate, build, file-tree, install-smoke, upgrade-smoke]
+    needs: [gate, lockfile, build, file-tree, install-smoke, upgrade-smoke]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
