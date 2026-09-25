@@ -21,7 +21,12 @@ cd "$ROOT"
 # editor backups, ...); the two -I patterns drop the deliberate exclusions.
 DPKG_ARGS=(-us -uc -tc -I -I.github -I.claude)
 
-if ! git rev-parse --git-dir > /dev/null 2>&1; then
+# safe.directory='*' turns off git's ownership guard: a container build (CI) checks out and
+# builds as root while the bind-mounted tree may belong to another uid, which otherwise makes
+# every git call fail with "dubious ownership" and drop to the in-place branch. This script
+# only reads and exports the tree, so waiving the guard for it is safe.
+GIT=(git -c 'safe.directory=*')
+if ! "${GIT[@]}" rev-parse --git-dir > /dev/null 2>&1; then
     echo "make-deb.sh: not a git checkout, building in place"
     exec dpkg-buildpackage "${DPKG_ARGS[@]}"
 fi
@@ -29,15 +34,15 @@ fi
 VERSION="$(dpkg-parsechangelog -S Version)"
 # A tree object of the tracked files with the working tree's current content (the identity is
 # only for the throwaway commit `stash create` writes; nothing is committed to a branch).
-tree="$(git -c user.email=build@localhost -c user.name=build stash create || true)"
+tree="$("${GIT[@]}" -c user.email=build@localhost -c user.name=build stash create || true)"
 [ -n "$tree" ] || tree=HEAD
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 src="$work/linuxmuster-radius-$VERSION"   # canonical dir name -> stable tarball top level
 mkdir -p "$src"
-git archive --format=tar "$tree" | tar -x -C "$src"
+"${GIT[@]}" archive --format=tar "$tree" | tar -x -C "$src"
 tracked="$(cd "$src" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)"
-echo "make-deb.sh: building from the git-tracked tree ($(git rev-parse --short "$tree"), $(printf '%s\n' "$tracked" | wc -l) files) in $src"
+echo "make-deb.sh: building from the git-tracked tree ($("${GIT[@]}" rev-parse --short "$tree"), $(printf '%s\n' "$tracked" | wc -l) files) in $src"
 ( cd "$src" && dpkg-buildpackage "${DPKG_ARGS[@]}" )
 
 # The source tarball must hold exactly the tracked files minus the two deliberate exclusions:
