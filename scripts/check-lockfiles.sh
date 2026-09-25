@@ -3,12 +3,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # THE lock gate. It proves that the hash-pinned lockfiles under controlplane/ are exactly what
-# they claim to be, and it is the first thing every consumer runs, before anything from a
-# lockfile is installed: the CI fast tier, the CI and release `lockfile` jobs,
-# packaging/build-venv.sh (so `make deb`, the CI `package` job and the release build) and
-# scripts/tests/run.sh (linuxmusterDEV work/tasks/nachbesserung-kalte-pruefung-umbau.md, K1,
-# R1, R2). packaging/build-venv.sh installs the locks with --no-deps, so nothing else would
-# notice a dependency added to pyproject.toml without re-locking.
+# they claim to be, and it is the first thing every consumer runs, before anything from a lockfile
+# is installed: the CI fast tier and the CI job lock-gates-build (first step each), the CI and
+# release `lockfile` jobs, packaging/build-venv.sh (so `make deb`, the CI `package` job and the
+# release build) and scripts/tests/run.sh, which stops when it fails. The lock regression tests
+# run only after it passed on the committed files, and their counter-probes (install paths without
+# the gate) install fixture locks, never these files (linuxmusterDEV
+# work/tasks/nachbesserung-kalte-pruefung-umbau.md, K1, R1, R2, S1). packaging/build-venv.sh
+# installs the locks with --no-deps, so nothing else would notice a dependency added to
+# pyproject.toml without re-locking.
 #   0. Every line of all three lockfiles (requirements, build-requirements, uv-requirements)
 #      is one pip reads exactly the way uv wrote it: empty, a comment, a `name==version \` pin
 #      or a `    --hash=sha256:<64 hex>` line continuing it, in printable ASCII
@@ -42,10 +45,15 @@
 # with its genuine hashes) that still satisfies the declared requirements passes every gate;
 # only the review of the lockfile diff catches it.
 #
-# Independent of the caller's environment (R1): a fixed PATH without any venv bin/, no
-# VIRTUAL_ENV, no PYTHON*/UV_*/PIP_* variables and no pip/uv configuration
-# files; Python is /usr/bin/python3 -I, uv gets that interpreter explicitly (--python) and
-# reads no uv.toml (--no-config), so it neither discovers a project venv nor a redirected index.
+# What it takes from the caller's environment (R1, S4): not the PATH (fixed, no venv bin/), not
+# VIRTUAL_ENV or any PYTHON*, UV_* or PIP_* variable (all dropped, PIP_REQUIREMENT and
+# PIP_CONSTRAINT included), no pip/uv configuration file; Python is /usr/bin/python3 -I, uv gets
+# that interpreter explicitly (--python) and reads no uv.toml (--no-config), so it neither
+# discovers a project venv nor a redirected index. HOME stays (pip/uv caches; every file is
+# hash-checked). Not neutralized, and named as the limit: BASH_ENV (bash runs it before a script's
+# first line), exported shell functions, and the proxy/CA variables (HTTPS_PROXY, SSL_CERT_FILE,
+# REQUESTS_CA_BUNDLE, ...) that decide whom the gate trusts as PyPI. Whoever sets those in the
+# caller's environment already runs code as the caller.
 # Needs /usr/bin/python3 with venv/ensurepip (python3-venv) and access to PyPI. To regenerate
 # a lockfile, run the command in its header inside controlplane/.
 set -euo pipefail

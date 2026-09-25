@@ -30,7 +30,11 @@
 # unpacked source package) is the tree built in place.
 set -euo pipefail
 
-# Nothing from the caller's environment decides which programs run (R1).
+# Which programs run is not left to the PATH, venv, Python/pip/uv or git variables of the caller
+# (R1). Not neutralized, and named as the limit: BASH_ENV (bash runs it before a script's first
+# line), exported shell functions, and the proxy/CA variables (HTTPS_PROXY, SSL_CERT_FILE,
+# REQUESTS_CA_BUNDLE, ...) that decide whom the build trusts as PyPI. Whoever sets those in the
+# caller's environment already runs code as the caller.
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 unset VIRTUAL_ENV CONDA_PREFIX
 for v in $(compgen -e); do

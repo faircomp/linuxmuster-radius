@@ -9,10 +9,14 @@
 # of debian/changelog (controlplane/setup.py reads it).
 set -euo pipefail
 
-# Nothing from the caller's environment decides which programs run (R1): a fixed PATH without
-# any venv bin/ (an activated venv, a checkout's .venv), no VIRTUAL_ENV or PYTHON* variables,
-# no UV_*/PIP_* variables and no pip configuration file. debian/rules calls this script with
-# a bare `bash`, and dpkg-buildpackage may be started by hand, so it cleans up itself.
+# Which programs run is not left to the PATH, venv or Python/pip/uv settings of the caller (R1): a
+# fixed PATH without any venv bin/ (an activated venv, a checkout's .venv), no VIRTUAL_ENV, no
+# PYTHON*, UV_* or PIP_* variables and no pip configuration file. debian/rules calls this script
+# with a bare `bash`, and dpkg-buildpackage may be started by hand, so it cleans up itself. Not
+# neutralized, and named as the limit: BASH_ENV (bash runs it before a script's first line),
+# exported shell functions, and the proxy/CA variables (HTTPS_PROXY, SSL_CERT_FILE,
+# REQUESTS_CA_BUNDLE, ...) that decide whom pip and the gate trust as PyPI. Whoever sets those in
+# the caller's environment already runs code as the caller.
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 unset VIRTUAL_ENV CONDA_PREFIX
 for v in $(compgen -e); do

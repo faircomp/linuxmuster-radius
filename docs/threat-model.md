@@ -66,13 +66,18 @@ SPDX-License-Identifier: GPL-3.0-or-later
   einer Prozess-Substitution ab, ohne den Bau anzuhalten — das fremde Paket lag im `.deb`
   (kalte Prüfung Stufe A, F2). Jetzt lassen Prüfung und Bau nur Zeilen zu, die uv schreibt,
   der Bau prüft jede Prüfsumme gegen PyPI, vergleicht `pip freeze` fehlerfest und verlangt,
-  dass jede Distribution im venv gebraucht wird. **Nachgehärtet (7.3.4, K1, Runde 3):**
-  nichts aus einer Sperrdatei wird installiert und kein Programm aus einem Sperrdatei-venv
-  läuft, bevor alle drei Sperrdateien voll geprüft sind (Grammatik, Hashes von PyPI, Pins =
-  Hülle der Eingaben, uv-Sperrdatei = genau das uv aus `uv-requirements.in`) — im Bau, im
-  CI-Fast-Tier, im Job `lockfile` (ci.yml und Release) und lokal in `run.sh`; das eine Tor
-  ist `scripts/check-lockfiles.sh`, mit eigenem, isoliertem uv. Die Tore hängen nicht von PATH,
-  aktiviertem venv, `.venv` im Checkout oder `PYTHON*`/`UV_*`/`PIP_*` des Aufrufers ab.
+  dass jede Distribution im venv gebraucht wird. **Nachgehärtet (7.3.4, K1, Runden 3/4):**
+  nichts aus den Paket-Sperrdateien (`requirements.lock`, `build-requirements.lock`) wird
+  installiert und kein Programm aus einem venv daraus läuft, bevor alle drei Sperrdateien
+  voll geprüft sind (Grammatik, Hashes von PyPI, Pins = Hülle der Eingaben); uv kommt aus der
+  uv-Sperrdatei erst, nachdem diese geprüft ist (genau das uv aus `uv-requirements.in`, Hashes
+  von PyPI). Das gilt im Bau, im CI-Fast-Tier, in den CI-Jobs `lockfile` (ci.yml und Release)
+  und `lock-gates-build` und lokal in `run.sh` (bricht nach rotem Tor ab); die Gegenproben der
+  Lock-Tests installieren nur Fixture-Sperrdateien. Das eine Tor ist
+  `scripts/check-lockfiles.sh`, mit eigenem, isoliertem uv. PATH, aktiviertes venv, `.venv`
+  im Checkout und `PYTHON*`/`UV_*`/`PIP_*` des Aufrufers steuern die Tore nicht; nicht
+  neutralisiert (Grenze) sind `BASH_ENV`, exportierte Shell-Funktionen und Proxy-/CA-Variablen
+  — wer sie setzt, führt ohnehin Code als der Aufrufer aus.
   `make deb` baut nur versionierte Dateien, führt nichts aus der `.git`-Konfiguration des
   Checkouts aus (kein fsmonitor, keine Hooks, keine Filter) und verzichtet nicht auf git's
   Eigentümerschutz. `scripts/tests/lock_gates.sh` und `make_deb_checks.sh` halten die Fälle

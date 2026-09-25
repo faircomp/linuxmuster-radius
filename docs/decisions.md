@@ -279,16 +279,24 @@ kann `bin/`-Skripte und eine `.pth` mitbringen; würde es vor der Mengen-/Hülle
 installiert, liefe sein Code (die `.pth` beim Bau des eigenen Wheels, im CI-Fast-Tier seine
 `bin/`-Werkzeuge im PATH). Darum ist `scripts/check-lockfiles.sh` **das** Lock-Tor, und jeder
 Verbraucher ruft es auf, bevor irgendetwas aus einer Sperrdatei installiert wird: der
-Fast-Tier (erster Schritt), der Job `lockfile` in ci.yml und release.yml (nur das Tor),
-`packaging/build-venv.sh` (also `make deb`, CI `package`, Release-`build`) und
-`scripts/tests/run.sh`. Es prüft alle drei Sperrdateien: Grammatik; die uv-Sperrdatei hält
+Fast-Tier und der CI-Job `lock-gates-build` (je erster Schritt), der Job `lockfile` in ci.yml
+und release.yml (nur das Tor), `packaging/build-venv.sh` (also `make deb`, CI `package`,
+Release-`build`) und `scripts/tests/run.sh` (zuerst; scheitert es, bricht run.sh ab).
+`scripts/tests/lock_gates.sh` bricht ab, wenn die committeten Sperrdateien das Tor nicht
+bestehen, und seine Gegenproben (Installationswege ohne Tor) installieren nur Fixture-
+Sperrdateien mit dem Test-Wheel, nie die des Checkouts (kalte Prüfung r3, F1). Es prüft alle drei Sperrdateien: Grammatik; die uv-Sperrdatei hält
 genau das `uv==` aus `uv-requirements.in` mit von PyPI veröffentlichten Hashes (nur stdlib);
 erst dann installiert es dieses uv in ein eigenes, isoliertes venv und ruft es per absolutem
 Pfad auf; uv löst `pyproject.toml`/`build-requirements.in` neu auf, die Pins müssen genau
-diese Hülle sein, und jeder Hash muss von PyPI für genau diese Fassung stammen. Die Tore
-hängen nicht von der Umgebung des Aufrufers ab: fester PATH ohne venv-`bin/`,
-`/usr/bin/python3 -I`, `VIRTUAL_ENV`/`PYTHON*`/`UV_*`/`PIP_*` entfernt, uv mit `--python
-/usr/bin/python3 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). Ein
+diese Hülle sein, und jeder Hash muss von PyPI für genau diese Fassung stammen. Aus der
+Umgebung des Aufrufers nehmen die Tore weder Programme noch Paketquellen: fester PATH ohne
+venv-`bin/`, `/usr/bin/python3 -I`, `VIRTUAL_ENV`/`PYTHON*`/`UV_*`/`PIP_*` entfernt (auch
+`PIP_REQUIREMENT`/`PIP_CONSTRAINT`), keine pip-/uv-Konfigurationsdateien, uv mit `--python
+/usr/bin/python3 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:**
+nicht neutralisiert sind `BASH_ENV` (bash führt es vor der ersten Skriptzeile aus),
+exportierte Shell-Funktionen und Proxy-/CA-Variablen (`HTTPS_PROXY`, `SSL_CERT_FILE`,
+`REQUESTS_CA_BUNDLE`, …), die bestimmen, wem das Tor als PyPI vertraut; wer die Umgebung des
+Aufrufers so setzt, führt ohnehin Code als dieser aus. Ein
 zusätzlicher Pin mit echten Hashes wird so abgewiesen, bevor sein Code läuft (nachgewiesen:
 die K1-, R1- und R2-Fälle in `scripts/tests/lock_gates.sh`, die Marker entstehen nie; die
 Gegenproben ohne Tor erzeugen sie).

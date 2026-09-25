@@ -72,14 +72,20 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   the lockfile's header inside `controlplane/` (needs `uv`) and check with
   `bash scripts/check-lockfiles.sh`. Never hand-edit a lockfile.
   `scripts/check-lockfiles.sh` is **the lock gate**, and every consumer runs it before
-  anything from a lockfile is installed: the CI fast tier (first step), the `lockfile` job
-  of ci.yml and release.yml (nothing else in it), `packaging/build-venv.sh` (so `make deb`,
-  CI `package`, the release build) and `scripts/tests/run.sh` (before lint/unit). It verifies
+  anything from a lockfile is installed: the CI fast tier and the CI job `lock-gates-build`
+  (first step each), the `lockfile` job of ci.yml and release.yml (nothing else in it),
+  `packaging/build-venv.sh` (so `make deb`, CI `package`, the release build) and
+  `scripts/tests/run.sh` (first; run.sh stops if it fails). `scripts/tests/lock_gates.sh`
+  stops if the committed locks fail it, and its counter-probes (install paths without the
+  gate) install fixture locks that pin only the test wheel, never the checkout's. It verifies
   all three locks — grammar, every hash on PyPI, pin set == closure of the declared inputs
   (uv re-resolves `pyproject.toml`/`build-requirements.in`) — and installs the uv it needs
   itself, from the verified uv lock into an isolated venv, called by absolute path. The
   gates run `/usr/bin/python3 -I`, set a fixed PATH and drop `VIRTUAL_ENV`, `PYTHON*`,
-  `UV_*` and `PIP_*`, so an activated venv or a `.venv` in the checkout takes no part.
+  `UV_*` and `PIP_*` (and pip/uv config files), so an activated venv or a `.venv` in the
+  checkout takes no part. Not neutralized, a stated limit: `BASH_ENV`, exported shell
+  functions and proxy/CA variables (`HTTPS_PROXY`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, …)
+  — whoever sets those already runs code as the caller, or decides whom the gate trusts as PyPI.
   Limit: pins are compared with the closure by name; another real release of a pinned
   package (older or newer, a week old, genuine hashes) that satisfies the declared
   requirements passes every gate — only the review of the lockfile diff catches it.
@@ -246,8 +252,8 @@ with **Docker**. **crabbox** leases an ephemeral Proxmox VM for this (provider i
 
 - **One aggregate runner:** `bash scripts/tests/run.sh [gate|lint|unit|quick|locks|e2e|all]`
   (created in P0/P1). Every mode but `e2e` runs the lock gate first (network needed); if it
-  fails, lint and unit are skipped. `quick` (default) = gate + lint + unit + the lock
-  regression test; `e2e`/`all` run the
+  fails, run.sh stops there and runs nothing else. `quick` (default) = gate + lint + unit +
+  the lock regression test; `e2e`/`all` run the
   Docker suites and **refuse without `LMNRADIUS_ALLOW_REAL=1`**. Summary:
   `N passed, M failed, K skipped` (exit ≠ 0 on failure); steps dep-gated.
 - **Box lifecycle:** `crabbox warmup` → `crabbox run --id <slug> -- 'bash scripts/tests/crabbox_bootstrap.sh'`

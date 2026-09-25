@@ -13,22 +13,24 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 - `ruff check` · `ruff format --check` · `mypy` · `pytest` · `shellcheck` · `reuse lint`
 - Aggregat: `bash scripts/tests/run.sh quick` = Lock-Tor zuerst, dann lint, unit und der
-  Lock-Regressionstest; scheitert das Tor, laufen lint und unit nicht (sie könnten Code aus
-  einer Sperrdatei ausführen). `run.sh gate` ist nur das Tor.
+  Lock-Regressionstest; scheitert das Tor, bricht run.sh ab und nichts weiter läuft (lint, unit
+  und der Lock-Test könnten Code aus einer Sperrdatei ausführen). `run.sh gate` ist nur das Tor.
 - Lock-Tor: `bash scripts/check-lockfiles.sh` — **das** Tor vor allem, was aus einer
-  Sperrdatei installiert wird (CI-Fast-Tier als erster Schritt, Job `lockfile` in ci.yml und
-  release.yml, `packaging/build-venv.sh`, `run.sh`). Prüft alle drei Sperrdateien: Grammatik,
+  Sperrdatei installiert wird (CI-Fast-Tier und CI-Job `lock-gates-build` als erster Schritt,
+  Job `lockfile` in ci.yml und release.yml, `packaging/build-venv.sh`, `run.sh`). Prüft alle drei Sperrdateien: Grammatik,
   uv-Sperrdatei = genau das uv aus `uv-requirements.in` mit PyPI-Hashes, dann uv aus ihr in
   ein isoliertes venv (absoluter Pfad), Pins = Hülle von `pyproject.toml`/
   `build-requirements.in`, jede Prüfsumme von PyPI, jede Fassung hat ein Wheel für CPython
   3.12/glibc 2.39/x86_64. Braucht `/usr/bin/python3` mit venv (python3-venv) und PyPI, kein uv
-  vorab. Unabhängig von PATH, venv und `PYTHON*`/`UV_*`/`PIP_*` des Aufrufers. Ohne Netz
+  vorab. Unabhängig von PATH, venv und `PYTHON*`/`UV_*`/`PIP_*` des Aufrufers; nicht
+  neutralisiert (Grenze): `BASH_ENV`, exportierte Shell-Funktionen, Proxy-/CA-Variablen. Ohne Netz
   scheitert es nach Sekunden (kurze PyPI-Timeouts, Abbruch beim ersten unlesbaren Pin).
   **Grenze:** eine andere echte Fassung (älter oder neuer, echte Hashes), die die deklarierten
   Anforderungen erfüllt, besteht das Tor; nur die Review fängt sie. `pytest` und `mypy` laufen
   in CI gegen die gelockten Fassungen, installiert erst nach dem Tor.
 - Lock-Tore: `bash scripts/tests/lock_gates.sh` (CI-Job `fast`; braucht PyPI, überspringt
-  nie) — manipulierte Lockfiles müssen **sowohl** `check-lockfiles.sh` **als auch**
+  nie; bricht sofort ab, wenn die committeten Sperrdateien das Tor nicht bestehen, denn jeder
+  Fall arbeitet auf Kopien davon) — manipulierte Lockfiles müssen **sowohl** `check-lockfiles.sh` **als auch**
   `packaging/build-venv.sh` (also den Paketbau) mit dem erwarteten Grund scheitern lassen:
   eingerückte URL-Zeile (`    zzzevil @ file:///…#sha256=…`), `--extra-index-url`, entfernte
   Hashes eines Pins, geänderter Hash (auch der eines nie geladenen sdist), zusätzlicher Pin mit
@@ -42,7 +44,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
     oder in der uv-Sperrdatei: Tor und `build-venv.sh` weisen es ab, der Marker entsteht nie.
   - **R6:** das Wheel ist scharf — ohne Tor installiert, sind seine `bin/`-Skripte ausführbare
     Dateien und schreiben den Marker, ebenso die `.pth`; Gegenprobe: `build-venv.sh` ohne den
-    Tor-Aufruf erzeugt den Marker aus einem `bin/`-Skript.
+    Tor-Aufruf erzeugt den Marker aus einem `bin/`-Skript. Die Gegenproben (hier und bei R2)
+    installieren nur Fixture-Sperrdateien, die allein das Test-Wheel pinnen, nie die
+    Sperrdateien des Checkouts (kalte Prüfung r3, F1).
   - **R1:** unter vergifteter Umgebung (aktiviertes venv mit dem Wheel vorn im PATH,
     `VIRTUAL_ENV`, `PYTHONPATH` mit Marker-`sitecustomize`, `PYTHONHOME`, `UV_*`/`PIP_*` samt
     Konfigurationsdateien, die Paketquelle und Interpreter umlenken, `.venv` im Checkout) gleiche
