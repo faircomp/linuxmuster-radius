@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The resolver of the lock gate (scripts/check-lockfiles.sh). uv-requirements.lock must pin
+# exactly this version (the gate checks it). Regenerate the lock from the PyPI file list of
+# this exact version; the gate installs it hash-pinned and in isolation.
+uv==0.12.18

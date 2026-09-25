@@ -27,7 +27,7 @@ assumptions in [`docs/threat-model.md`](docs/threat-model.md), the decisions in
 | CLI | `controlplane/lmnradius/cli.py` | Python · Typer · httpx (thin client of the REST API, **no direct Docker**) |
 | EAP-CA / Cert manager | `controlplane/lmnradius/ca.py` | Private single-purpose EAP-CA (`ca init` / `cert issue` / `ca export`) |
 | E2E / Deploy | `deploy/` | docker-compose (Samba AD DC + joined FreeRADIUS + `eapol_test`), instance YAML, client GPO/MDM templates |
-| Packaging | `packaging/` (`make deb`), `debian/changelog` | `.deb` via `packaging/build-deb.sh` (hermetic venv under `/opt`, only from the hash-pinned lockfiles `controlplane/*.lock`), hardened systemd service (lmn73 layout) |
+| Packaging | `debian/` (`make deb` = `dpkg-buildpackage`), `packaging/` | debhelper 13 package; `packaging/build-venv.sh` builds the hermetic venv (only from the hash-pinned lockfiles `controlplane/*.lock`) into the package tree, `debian/venv-relocate` makes it correct for `/opt/linuxmuster-radius/venv`; hardened systemd service (lmn73 layout) |
 | Tests | `scripts/tests/` | `run.sh` aggregator; heavy tier on **crabbox** (`eapol_test` E2E) |
 
 > **The stack is deliberately Python** (linuxmuster-api7/webui7 are likewise FastAPI/
@@ -40,22 +40,57 @@ This is one of Kevin's own linuxmuster.net packages. The development hub is
 conventions are `../../docs/paket-konventionen.md` there. The rules that bite here:
 
 - **Version:** the top entry of `debian/changelog` is the only hand-edited version
-  (`7.3.N`, distribution `lmn73`, no `-0` revision). `packaging/build-deb.sh`
-  (`dpkg-parsechangelog`), `controlplane/setup.py` (`pyproject.toml` is `dynamic`) and
+  (`7.3.N`, distribution `lmn73`, no `-0` revision). `dpkg-buildpackage` (the .deb),
+  `controlplane/setup.py` (`pyproject.toml` is `dynamic`) and
   `GET /v1/version` (`importlib.metadata`) derive from it — never write a version
   anywhere else (not in `docs/install.md` either). Never bump it outside a release:
   Kevin sets it and tags `v7.3.N`; `release.yml` refuses a tag that does not match
   the changelog.
 - **Changelog:** one bullet in the top block of `debian/changelog` per user-visible change,
   in the same PR, written for admins in English. There is no `CHANGELOG.md`.
-- **Build:** `make deb` (wraps `packaging/build-deb.sh`; needs root, so run it in
-  `ghcr.io/linuxmuster/lmndev-runner:24.04` like CI does, pinned by digest — the command is
-  in the `Makefile`; never reference the image by tag alone).
+- **Build:** `make deb` = `dpkg-buildpackage` (debhelper 13, `Rules-Requires-Root: no`). It
+  writes `../linuxmuster-radius_<version>_amd64.deb` plus `.changes`, `.buildinfo`, `.dsc` and
+  the source tarball **next to** the checkout. Build it in
+  `ghcr.io/linuxmuster/lmndev-runner:24.04` like CI does, pinned by digest — the command is in
+  the `Makefile` (it mounts the repository's common git directory too, so it works in a git
+  worktree); never reference the image by tag alone. `packaging/make-deb.sh` builds an export
+  of the **git-tracked files as they are in the working tree**: uncommitted edits and staged
+  new files ARE built, untracked files are NOT (`git add` a new module first), and every
+  difference from HEAD is printed as a WARNING before and after the build — the .deb still
+  carries the changelog's version, so never hand such a build around as the release. A `.git`
+  that git cannot use (a worktree without its repository, a checkout owned by someone else)
+  stops the build; nothing configured in `.git` runs (no fsmonitor, hooks or filters).
+  `debian/rules` keeps debhelper's
+  file-changing tools (strip, dwz, fixperms, ...) out of the venv, and
+  `debian/venv-relocate --verify` fails the build if any pip-installed file changed.
+  `debian/venv-relocate` is shared byte-for-byte with linuxmuster-squid and
+  linuxmuster-readonlydc (the hub keeps the reference); change it there, not here alone.
 - **Python dependencies** are locked with hashes (ADR-016): `controlplane/requirements.lock`
   (from `pyproject.toml`) and `controlplane/build-requirements.lock` (pip + setuptools).
-  After changing dependencies, re-run the command in the lockfile's header inside
-  `controlplane/` (needs `uv`) and check with `bash scripts/check-lockfiles.sh`. Never
-  hand-edit a lockfile; Renovate bumps them by PR.
+  `controlplane/uv-requirements.lock` pins the resolver `uv` (exactly the `uv==` of
+  `uv-requirements.in`, all PyPI hashes). After changing dependencies, re-run the command in
+  the lockfile's header inside `controlplane/` (needs `uv`) and check with
+  `bash scripts/check-lockfiles.sh`. Never hand-edit a lockfile.
+  `scripts/check-lockfiles.sh` is **the lock gate**, and every consumer runs it before
+  anything from a lockfile is installed: the CI fast tier and the CI job `lock-gates-build`
+  (first step each), the `lockfile` job of ci.yml and release.yml (nothing else in it),
+  `packaging/build-venv.sh` (so `make deb`, CI `package`, the release build) and
+  `scripts/tests/run.sh` (first; run.sh stops if it fails). `scripts/tests/lock_gates.sh`
+  stops if the committed locks fail it, and its counter-probes (install paths without the
+  gate) install fixture locks that pin only the test wheel, never the checkout's. It verifies
+  all three locks — grammar, every hash on PyPI, pin set == closure of the declared inputs
+  (uv re-resolves `pyproject.toml`/`build-requirements.in`) — and installs the uv it needs
+  itself, from the verified uv lock into an isolated venv, called by absolute path. The
+  gates run `/usr/bin/python3 -I`, set a fixed PATH and drop `VIRTUAL_ENV`, `PYTHON*`,
+  `UV_*` and `PIP_*` (and pip/uv config files), so an activated venv or a `.venv` in the
+  checkout takes no part. Not neutralized, a stated limit: `BASH_ENV`, exported shell
+  functions and proxy/CA variables (`HTTPS_PROXY`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, …)
+  — whoever sets those already runs code as the caller, or decides whom the gate trusts as PyPI.
+  Limit: pins are compared with the closure by name; another real release of a pinned
+  package (older or newer, a week old, genuine hashes) that satisfies the declared
+  requirements passes every gate — only the review of the lockfile diff catches it.
+  Renovate is disabled (Kevin, 2026-09-25), so locks, digests, action
+  SHAs and CI tool pins are raised by hand in a reviewed PR.
 - **Maintainer string** everywhere: `Kevin Stenzel <mail@kevin-stenzel.de>`.
 
 **Security pitfalls (from the threat model — do not violate):**
@@ -215,8 +250,10 @@ with **Docker**. **crabbox** leases an ephemeral Proxmox VM for this (provider i
 `.claude/settings.json`, token only in the gitignored `.claude/settings.local.json`;
 `crabbox doctor`). Rules/details: the `/test` skill (`.claude/skills/test/SKILL.md`).
 
-- **One aggregate runner:** `bash scripts/tests/run.sh [lint|unit|quick|e2e|all]`
-  (created in P0/P1). `quick` (default) = lint + unit; `e2e`/`all` run the
+- **One aggregate runner:** `bash scripts/tests/run.sh [gate|lint|unit|quick|locks|e2e|all]`
+  (created in P0/P1). Every mode but `e2e` runs the lock gate first (network needed); if it
+  fails, run.sh stops there and runs nothing else. `quick` (default) = gate + lint + unit +
+  the lock regression test; `e2e`/`all` run the
   Docker suites and **refuse without `LMNRADIUS_ALLOW_REAL=1`**. Summary:
   `N passed, M failed, K skipped` (exit ≠ 0 on failure); steps dep-gated.
 - **Box lifecycle:** `crabbox warmup` → `crabbox run --id <slug> -- 'bash scripts/tests/crabbox_bootstrap.sh'`

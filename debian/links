@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The operator CLI on PATH (docs/install.md's first step after the install); a packaged
+# symlink, so dpkg removes it with the package.
+opt/linuxmuster-radius/venv/bin/lmnradius usr/bin/lmnradius

@@ -181,7 +181,9 @@ dannyda (HowTos: Subnetz statt Controller-IP in clients.conf).
 apt-Installation ist das menschliche Go/No-Go), jeweils mit Health-Auto-Rollback.
 **Begründung:** deterministische, auditierbare Updates. **Verworfene Alternative:**
 Watchtower — archiviert (2025-12-17), **kein** Rollback, wendet Breaking Changes blind
-an, braucht einen Root-Socket. **Quelle:** Watchtower-Repo (archiviert 2025-12-17);
+an, braucht einen Root-Socket. **Stand 2026-09-25:** Renovate ist abgeschaltet (Kevin), bis
+es mit einer GitHub-App wieder läuft; bis dahin hebt ein Mensch Digests, Locks und Pins per
+PR an. **Quelle:** Watchtower-Repo (archiviert 2025-12-17);
 linuxmuster-squid ADR-010.
 
 ### ADR-011 — Packaging via dh-virtualenv
@@ -211,7 +213,7 @@ Fläche, kein Endpoint-Filter). **Quelle:** tecnativa/docker-socket-proxy; Docke
 ### ADR-013 — Image-Registry: GHCR (Default)
 **Status:** Accepted (Default 2026-07-10; jederzeit änderbar). **Entscheidung:** Das
 Data-Plane-Image wird nach **GHCR (`ghcr.io/faircomp/linuxmuster-radius`)** publiziert;
-Renovate pinnt den Digest. **Begründung:** kostenlos, integriert sauber mit GitHub-CI +
+der Digest wird per PR gepinnt (von Hand, solange Renovate abgeschaltet ist). **Begründung:** kostenlos, integriert sauber mit GitHub-CI +
 Renovate-Digest-Pinning. **Verworfene Alternative:** Docker Hub (Pull-Rate-Limits)
 oder eine selbstgehostete/linuxmuster-Registry (mehr Infrastruktur). **Quelle:**
 GitHub Container Registry (Docs); linuxmuster-squid ADR-013.
@@ -254,16 +256,58 @@ radius-and-ad.md § 3 und threat-model.md). **Quelle:** FreeRADIUS-Wiki „Rlm_l
 --python-version=3.12 --exclude-newer=P7D` erzeugt (nur Fassungen, die mindestens eine Woche
 auf PyPI liegen; in diesem Fenster fallen kompromittierte Uploads meist auf): `controlplane/requirements.lock` (Laufzeit, aus
 `pyproject.toml`) und `controlplane/build-requirements.lock` (pip selbst und setuptools,
-aus `build-requirements.in`). `build-deb.sh` installiert sie mit `--require-hashes
+aus `build-requirements.in`). `packaging/build-venv.sh` installiert sie mit `--require-hashes
 --only-binary :all: --no-deps`, baut das eigene Paket offline zum Wheel (`--no-index
 --no-build-isolation`) und installiert es per Namen (kein Build-Pfad in `direct_url.json`),
 prüft mit `pip check`, entfernt setuptools wieder und bricht ab, wenn `pip freeze --all`
 nicht exakt den Lockfiles entspricht.
-`scripts/check-lockfiles.sh` (CI-Job `lockfile`) beweist, dass die Lockfiles zu ihren
-Quellen passen (eine Fassung jünger als sieben Tage fällt dabei durch), jede Prüfsumme eine
-von PyPI für genau diese Fassung ist und jede Fassung ein Wheel für die Zielplattform hat
-(CPython 3.12, glibc 2.39, x86_64). Renovate hebt die
-Fassungen per PR, ohne Automerge. **Begründung:** ohne Pins zog jeder Release-Bau die
+Seit 7.3.4 (kalte Prüfung von Stufe A, Befund F2) liest der Bau die Lockfiles nicht mehr
+ungeprüft: `scripts/lockfile_gate.py` lässt vor pip nur Zeilen zu, die uv schreibt (leer,
+Kommentar, `name==version \`, `    --hash=sha256:<64 hex>`, nur druckbares ASCII) — pip liest
+auch eingerückte Zeilen, URL-Anforderungen (`name @ url#sha256=…` erfüllt `--require-hashes`)
+und Optionszeilen wie `--extra-index-url`, und `str.splitlines()` trennt auch an CR/FF/U+2028;
+eine eingerückte URL-Zeile hatte die alte Prüfung (nur Spalte 1) passiert und landete im
+`.deb`. Jede Prüfsumme muss eine sein, die PyPI für genau diese Fassung veröffentlicht (pip
+prüft nur die der geladenen Datei). Nach der Installation vergleicht der Bau `pip freeze
+--all` Zeile für Zeile mit den Lockfiles (jede Zeile ein schlichtes `name==version`, jeder
+Fehler bricht ab, keine Prozess-Substitution mehr, die eine Ausnahme verschluckt) und
+verlangt, dass jede installierte Distribution von `lmnradius` oder pip gebraucht wird (ein
+zusätzlicher Pin mit echten Hashes fiele sonst durch). `scripts/tests/lock_gates.sh`
+(Fast-Tier) hält die Fälle dauerhaft fest.
+Weiter nachgehärtet (7.3.4, Nachbesserung K1 und Runde 3): ein Wheel aus einer Sperrdatei
+kann `bin/`-Skripte und eine `.pth` mitbringen; würde es vor der Mengen-/Hüllen-Prüfung
+installiert, liefe sein Code (die `.pth` beim Bau des eigenen Wheels, im CI-Fast-Tier seine
+`bin/`-Werkzeuge im PATH). Darum ist `scripts/check-lockfiles.sh` **das** Lock-Tor, und jeder
+Verbraucher ruft es auf, bevor irgendetwas aus einer Sperrdatei installiert wird: der
+Fast-Tier und der CI-Job `lock-gates-build` (je erster Schritt), der Job `lockfile` in ci.yml
+und release.yml (nur das Tor), `packaging/build-venv.sh` (also `make deb`, CI `package`,
+Release-`build`) und `scripts/tests/run.sh` (zuerst; scheitert es, bricht run.sh ab).
+`scripts/tests/lock_gates.sh` bricht ab, wenn die committeten Sperrdateien das Tor nicht
+bestehen, und seine Gegenproben (Installationswege ohne Tor) installieren nur Fixture-
+Sperrdateien mit dem Test-Wheel, nie die des Checkouts (kalte Prüfung r3, F1). Es prüft alle drei Sperrdateien: Grammatik; die uv-Sperrdatei hält
+genau das `uv==` aus `uv-requirements.in` mit von PyPI veröffentlichten Hashes (nur stdlib);
+erst dann installiert es dieses uv in ein eigenes, isoliertes venv und ruft es per absolutem
+Pfad auf; uv löst `pyproject.toml`/`build-requirements.in` neu auf, die Pins müssen genau
+diese Hülle sein, und jeder Hash muss von PyPI für genau diese Fassung stammen. Aus der
+Umgebung des Aufrufers nehmen die Tore weder Programme noch Paketquellen: fester PATH ohne
+venv-`bin/`, `/usr/bin/python3 -I`, `VIRTUAL_ENV`/`PYTHON*`/`UV_*`/`PIP_*` entfernt (auch
+`PIP_REQUIREMENT`/`PIP_CONSTRAINT`), keine pip-/uv-Konfigurationsdateien, uv mit `--python
+/usr/bin/python3 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:**
+nicht neutralisiert sind `BASH_ENV` (bash führt es vor der ersten Skriptzeile aus),
+exportierte Shell-Funktionen und Proxy-/CA-Variablen (`HTTPS_PROXY`, `SSL_CERT_FILE`,
+`REQUESTS_CA_BUNDLE`, …), die bestimmen, wem das Tor als PyPI vertraut; wer die Umgebung des
+Aufrufers so setzt, führt ohnehin Code als dieser aus. Ein
+zusätzlicher Pin mit echten Hashes wird so abgewiesen, bevor sein Code läuft (nachgewiesen:
+die K1-, R1- und R2-Fälle in `scripts/tests/lock_gates.sh`, die Marker entstehen nie; die
+Gegenproben ohne Tor erzeugen sie).
+`scripts/check-lockfiles.sh` beweist außerdem, dass die Lockfiles zu ihren
+Quellen passen (eine Fassung jünger als sieben Tage fällt dabei durch) und jede Fassung ein
+Wheel für die Zielplattform hat (CPython 3.12, glibc 2.39, x86_64). **Grenze:** Die Pins
+werden nach Namen mit der Hülle verglichen, die Auflösung bevorzugt die gepinnten Fassungen.
+Eine andere echte Fassung eines gepinnten Pakets (älter **oder neuer**, mindestens eine Woche
+alt, mit ihren echten Hashes), die die deklarierten Anforderungen erfüllt, besteht darum jedes
+Tor; nur die Review des Sperrdatei-Diffs fängt sie. Neue Fassungen kommen per PR, ohne
+Automerge (von Hand, solange Renovate abgeschaltet ist). **Begründung:** ohne Pins zog jeder Release-Bau die
 neueste PyPI-Fassung ohne Prüfsumme; Bauten waren nicht reproduzierbar und eine
 kompromittierte Fassung wäre unbemerkt in ein root-installiertes Paket gelangt.
 **Verworfene Alternativen:** Pins ohne Hashes (schützen nicht gegen eine ausgetauschte
@@ -276,8 +320,9 @@ Auflösung). **Quelle:** pip-Doku „Secure installs" (hash-checking mode); Reno
 ### ADR-017 — Build-Eingaben unveränderlich referenziert, Release erst als Entwurf
 **Status:** Accepted (Stufe A „Lieferkette", 2026-09-23). **Entscheidung:** Das Build-Image
 steht überall als `ghcr.io/linuxmuster/lmndev-runner:<tag>@sha256:<digest>` (ci.yml,
-release.yml und der Build-Befehl im Makefile, derselbe Digest). Renovate schlägt neue
-Digests als PR vor, ein Mensch merged; den Tag ändert Renovate nie (`24.04 → 26.04` wäre
+release.yml und der Build-Befehl im Makefile, derselbe Digest). Neue Digests kommen per
+PR, ein Mensch merged (von Hand, solange Renovate abgeschaltet ist); den Tag ändert ein
+Bump nie (`24.04 → 26.04` wäre
 eine neue linuxmuster-Linie, kein Update). Jede GitHub Action steht per vollständigem
 Commit-SHA mit `# vN`-Kommentar (`helpers:pinGitHubActionDigests`). Das Release legt die
 `gh`-CLI des Runners an (keine Dritt-Action neben `contents: write`): erst als Entwurf, dann

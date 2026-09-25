@@ -45,7 +45,7 @@ VER=$(curl -fsSL https://api.github.com/repos/faircomp/linuxmuster-radius/releas
       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 : "${VER:?konnte die neueste Version nicht von der GitHub-API lesen - VER=7.3.N von Hand setzen}"
 curl -fsSLo lmnradius.deb \
-  https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_all.deb
+  https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_amd64.deb
 sudo apt install -y ./lmnradius.deb
 lmnradius health                                            # {"status":"ok"}
 ```
@@ -253,9 +253,6 @@ sudo apt upgrade                               # neues .deb -> postinst: try-res
 > Docker-Bridge-Adresse) und die Instanz-Historie (`git log` im State-Verzeichnis)
 > repariert.
 `update-all` hebt **jede Instanz auf das im `.deb` gepinnte Image**, pro Instanz mit Health-Check und
-**automatischem Rollback**. Neue Images kommen via **Renovate**: ein neues GHCR-Image → Renovate
-öffnet einen **Digest-Bump-PR** (`DEFAULT_IMAGE`), ein Mensch merged → neuer `v*`-Tag → neues `.deb`
-→ `apt upgrade`. *(Für das Repo: das Secret `RENOVATE_TOKEN`, ein fine-grained PAT nur für dieses Repo
-mit Contents, Pull requests, Issues und Workflows: read and write, ist Pflicht. Mit dem `GITHUB_TOKEN`
-starten Renovate-PRs keine CI, und Änderungen unter `.github/workflows/` (Action-SHAs, Build-Image-
-Digest) darf er gar nicht pushen.)*
+**automatischem Rollback**. Neue Images kommen per **Digest-Bump-PR** (`DEFAULT_IMAGE`): ein neues
+GHCR-Image → PR, ein Mensch merged → neuer `v*`-Tag → neues `.deb` → `apt upgrade`. Renovate ist seit
+2026-09-25 abgeschaltet (Kevin); bis es mit einer GitHub-App wieder läuft, entsteht der PR von Hand.

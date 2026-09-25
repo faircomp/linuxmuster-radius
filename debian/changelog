@@ -1,3 +1,52 @@
+linuxmuster-radius (7.3.4) lmn73; urgency=medium
+
+  * The package is now built with debhelper (dpkg-buildpackage) instead of a
+    hand-written script. It installs the same files with the same
+    permissions as 7.3.3; the service, the CLI, the configuration and the
+    upgrade path behave exactly as before. New are only the files
+    /usr/share/doc/linuxmuster-radius/changelog.gz and copyright and the
+    package's lintian overrides.
+  * Architecture is now amd64 instead of all: the bundled Python environment
+    contains compiled x86_64 libraries, so the package never worked on other
+    architectures. apt upgrades an installed 7.3.x (all) to 7.3.4 (amd64)
+    like any other version.
+  * Depends on python3 (>= 3.12) and python3 (<< 3.13) instead of
+    python3 (>= 3.12): the environment under /opt/linuxmuster-radius/venv is
+    built for the Python 3.12 of Ubuntu 24.04. A plain "apt upgrade" then
+    keeps the newer Python back (python3 stays at 3.12) instead of leaving a
+    broken service; a full distribution upgrade ("apt full-upgrade",
+    do-release-upgrade) removes this package instead, leaving its
+    configuration and state in place, so it can be reinstalled once a
+    matching build exists. The compiled libraries add libc6 and libgcc-s1.
+  * Hardened dependency checks. The lockfile check and the build now read
+    every line of the lockfiles the way pip does and refuse anything but
+    pinned versions with their SHA-256 hashes; an indented or URL
+    requirement and option lines such as --extra-index-url used to pass the
+    check. Before anything from a lockfile is installed, in the build and in
+    every CI job, every hash is verified against PyPI and the pins must be
+    exactly the resolved closure of the declared dependencies: an extra
+    package slipped into a lockfile, even with a genuine hash, is refused
+    before its code can run. The resolver for that check, uv, is pinned by
+    hash and verified first. The checks no longer take their programs or
+    package sources from the PATH, an activated virtualenv or the Python,
+    pip and uv variables of whoever runs them. The build re-checks the
+    finished environment against the lockfiles. Not caught: a pin moved to
+    another genuine release, older or newer, that still satisfies the
+    declared dependencies; only the review of the lockfile change shows it.
+  * The post-installation script turns off git's background maintenance in
+    the instance change log (/var/lib/linuxmuster-radius/instances) and no
+    longer lets git look into /root/.config when XDG_CONFIG_HOME is
+    inherited from the installing admin. A precaution taken over from
+    linuxmuster-squid 7.3.4, whose configuration failed on such a
+    maintenance process.
+  * After publishing, the release job checks that GitHub marks the release
+    immutable and fails otherwise, so the files of a release cannot be
+    replaced unnoticed. A release also carries the source package (.dsc,
+    source tarball with the files tracked in git except the CI workflows
+    and developer tool settings, .changes, .buildinfo).
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Fri, 25 Sep 2026 11:55:45 +0200
+
 linuxmuster-radius (7.3.3) lmn73; urgency=medium
 
   * Reproducible builds with verified dependencies: the Python environment

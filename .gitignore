@@ -23,9 +23,12 @@ dist/
 build/
 
 # --- Debian packaging build artifacts ---
+# debhelper's working files; `make deb` (dpkg-buildpackage -tc) removes them again, and
+# writes the .deb, .changes, .buildinfo, .dsc and source tarball one level above the tree.
 debian/.debhelper/
 debian/files
 debian/*.substvars
+debian/debhelper-build-stamp
 debian/linuxmuster-radius/
 *.deb
 *.buildinfo

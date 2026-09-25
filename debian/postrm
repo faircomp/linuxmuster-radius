@@ -10,4 +10,5 @@ if [ "$1" = "purge" ]; then
     rm -rf /opt/linuxmuster-radius
     rm -rf /etc/linuxmuster-radius /var/lib/linuxmuster-radius
 fi
+#DEBHELPER#
 exit 0

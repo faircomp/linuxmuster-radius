@@ -86,8 +86,8 @@ def is_ldaps(url: str) -> bool:
 # Default data-plane image for new/updated instances, so callers need not pass
 # --image. Pinned to an immutable ``@sha256:<digest>`` — the data-plane image built and
 # published to GHCR by the build-image workflow (verified end-to-end against a real DC);
-# Renovate keeps it current (same rationale as linuxmuster-squid). The image validator
-# requires an explicit :tag or @sha256 and rejects a bare repo either way.
+# raised by hand in a reviewed PR while Renovate is disabled (Kevin, 2026-09-25). The
+# image validator requires an explicit :tag or @sha256 and rejects a bare repo either way.
 DEFAULT_IMAGE = "ghcr.io/faircomp/linuxmuster-radius@sha256:7385d3a64c3d98afa33577473c6b065f2a6a2ef88fa7ff70117ab6262118a77a"
 
 

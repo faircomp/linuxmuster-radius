@@ -1,11 +1,13 @@
 # SPDX-FileCopyrightText: Kevin Stenzel
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# From linuxmusterDEV/templates/ci.yml. Three stages on every push/PR: the fast tier
-# (lint/type/unit + shell + license compliance), the package build in the same
-# container upstream CI uses (proves it builds on the target Ubuntu/Python), and an
-# install smoke on ubuntu-24.04. The heavy winbind/EAP FreeRADIUS E2E runs on crabbox,
-# not in GitHub CI.
+# From linuxmusterDEV/templates/ci.yml. On every push to main and every PR: the fast tier
+# (lint/type/unit, the lockfile gate regression test, shell, license compliance), the
+# lockfile check, the package build with dpkg-buildpackage in the same container upstream CI
+# uses (proves it builds on the target Ubuntu/Python) plus lintian, the file-tree gate against
+# the newest release, an install smoke and an upgrade smoke on ubuntu-24.04. release.yml runs
+# the same gates on a tag. The heavy winbind/EAP FreeRADIUS E2E runs on crabbox, not in
+# GitHub CI.
 #
 # Supply chain (stage A, linuxmusterDEV work/plans/paketarchiv.md §2): every input of the
 # build is pinned to an immutable reference, because a released .deb vouches for everything
@@ -13,10 +15,13 @@
 #  * Python dependencies from hash-pinned lockfiles (controlplane/*.lock, job `lockfile`).
 #  * Build image by digest. ghcr.io/linuxmuster/lmndev-runner:<tag> is a mutable tag of
 #    another org, rebuilt every week, and the build runs as root in it; `:<tag>@sha256:<digest>`
-#    pulls exactly that image (the digest wins, the tag only tells Renovate which tag's digest
-#    to follow). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
+#    pulls exactly that image (the digest wins, the tag only names the line whose digest is
+#    pinned). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
 #    different build than the one that is released.
 #  * Every action by full commit SHA with a `# vN` comment: a tag can be moved, a SHA cannot.
+# Pins and locks are raised by hand: the Renovate workflow is disabled (Kevin, 2026-09-25)
+# until Renovate is re-enabled with a GitHub App (renovate.json and renovate.yml stay for that
+# day). Raise a digest in ci.yml, release.yml and the Makefile in the same commit.
 name: ci
 
 on:
@@ -45,16 +50,27 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"        # = Ubuntu 24.04 / lmn73
+      # K1/R2: the lock gate is the first step, before anything from a lockfile is installed.
+      # It verifies all three lockfiles (grammar, uv lock == the published uv of
+      # uv-requirements.in, every hash published by PyPI, pins == closure of the declared
+      # inputs) with /usr/bin/python3 -I and a uv it installs itself from the verified uv lock
+      # into an isolated venv; it ignores PATH (setup-python's bin/ is first on it), VIRTUAL_ENV,
+      # PYTHON*, UV_* and PIP_*. A planted package in any lock stops the job here, so it is
+      # never installed into the interpreter below whose bin/ is on PATH.
+      # scripts/tests/lock_gates.sh (R2) replays this step and the next word for word.
+      - name: Lock gate (every lockfile, before anything from one is installed)
+        run: bash scripts/check-lockfiles.sh
       # The gate tools are PINNED on purpose: an unpinned `pip install ruff` picks up
       # whatever released last, and a linter that widens its default rule set turns the
       # pipeline red without a single line of our code changing (exactly what happened
-      # on 2026-08-04). Pinned == the developer's local result == CI's result. Renovate
-      # proposes bumps as PRs, so upgrading stays a deliberate, reviewed step.
+      # on 2026-08-04). Pinned == the developer's local result == CI's result. The pins are
+      # raised by hand in a reviewed PR, so upgrading stays a deliberate step.
       # The runtime dependencies come from the hash-pinned lockfile the .deb is built from,
-      # installed AFTER the tools so no tool can move them: pytest and mypy see exactly
-      # the versions that ship (and the ones a Renovate lockfile bump proposes), not
-      # whatever PyPI serves today. pip check: the tools still fit the locked versions.
-      - name: Install control-plane (locked dependencies) + tools
+      # verified by the step above, installed AFTER the tools so no tool can move them:
+      # pytest and mypy see exactly the versions that ship (and the ones a lockfile bump
+      # proposes), not whatever PyPI serves today. pip check: the tools still fit the locked
+      # versions. uv is not installed here: the gate brings its own.
+      - name: Install tools + control plane (locked dependencies)
         run: |
           pip install \
             ruff==0.15.21 \
@@ -74,30 +90,43 @@ jobs:
         run: mypy --config-file controlplane/pyproject.toml controlplane/lmnradius
       - name: pytest
         run: pytest -q controlplane/tests
+      # Tampered lockfiles (an indented URL requirement, --extra-index-url, removed or changed
+      # hashes, an extra pin, a pin without hash, a planted package in any lock, ...) must fail
+      # scripts/check-lockfiles.sh AND packaging/build-venv.sh, for the expected reason, without
+      # running any of the planted code, also under a poisoned caller environment (R1) and
+      # through the lock steps of ci.yml/release.yml (R2). Needs PyPI; never skips.
+      - name: Lockfile gates refuse tampered lockfiles
+        run: bash scripts/tests/lock_gates.sh
+      # debian/venv-relocate has no .py extension, so `ruff check .` does not see it.
+      - name: ruff (debian/venv-relocate)
+        run: |
+          ruff check --line-length 100 debian/venv-relocate
+          ruff format --check --line-length 100 debian/venv-relocate
       - name: shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --severity=warning \
-            image/*.sh scripts/*.sh packaging/*.sh \
-            packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm
+            image/*.sh scripts/*.sh scripts/tests/*.sh packaging/*.sh \
+            debian/postinst debian/prerm debian/postrm
       - name: reuse (license compliance)
         run: reuse lint
 
-  # build-deb.sh installs the lockfiles with --no-deps, so only this job notices a
-  # dependency added to pyproject.toml without re-locking, a hand-edited pin or hash, or a
-  # locked version without a wheel for the target (CPython 3.12, glibc 2.39, x86_64).
+  # The lock gate on its own: it notices a malformed lockfile, a uv lock that is not exactly
+  # the published uv of uv-requirements.in, a lock that no longer matches pyproject.toml or
+  # build-requirements.in (an extra or missing pin), a pin younger than seven days, a hash PyPI
+  # does not publish, or a locked version without a wheel for the target (CPython 3.12,
+  # glibc 2.39, x86_64). The fast tier and the build (packaging/build-venv.sh) run the same
+  # gate first; release.yml carries this job character for character.
   lockfile:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
+      # Nothing is installed before or around it (R2): the gate verifies the uv lock with the
+      # stdlib, installs uv from it into an isolated venv of its own and calls it by absolute
+      # path, with /usr/bin/python3 -I (the runner's Python 3.12), a fixed PATH and no
+      # UV_*/PIP_* variables.
       - name: Lockfiles match their sources, PyPI and the target platform
-        run: |
-          pip install \
-            uv==0.12.18
-          bash scripts/check-lockfiles.sh
+        run: bash scripts/check-lockfiles.sh
 
   resolve:
     runs-on: ubuntu-latest
@@ -109,7 +138,8 @@ jobs:
       - id: image
         run: |
           DIST=$(dpkg-parsechangelog -S Distribution); NUM="${DIST#lmn}"
-          # By digest, never by tag alone (see the header); Renovate proposes the bumps.
+          # By digest, never by tag alone (see the header); raise both lines here and in
+          # release.yml together.
           if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then
             IMG=ghcr.io/linuxmuster/lmndev-runner:latest@sha256:d735e6ccc6fd9df71b2552b06ac6f5cb4bf2d03f40e14bafe47213325b7b801b
           else
@@ -126,18 +156,186 @@ jobs:
       options: --user root
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Build package (make deb wraps packaging/build-deb.sh)
+      - name: Build package (make deb = dpkg-buildpackage; build deps via build-dep)
         run: |
-          # No debian/control at the root yet (that is the debian/ conversion PR), so
-          # install what build-deb.sh needs by hand instead of `apt-get build-dep`.
-          apt-get update -qq && apt-get install -y -qq python3-venv
+          apt-get update -qq && apt-get build-dep -y -qq .
+          # make-deb.sh keeps git's ownership guard on. The runner created the workspace
+          # directory, the container builds as root: trust exactly this checkout (its
+          # .git/config was written by actions/checkout, not by the pull request), never '*'.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           make deb
-          mkdir -p output && mv ./linuxmuster-radius_*.deb output/
+          # dpkg-buildpackage writes one level above the source tree. The .dsc and the
+          # source tarball go along because the .changes lists them with their checksums.
+          mkdir -p output && mv ../*.deb ../*.changes ../*.buildinfo ../*.dsc ../*.tar.xz output/
+          dpkg-deb -I output/*.deb
+          # DEBIAN/md5sums must cover every shipped file, or `dpkg --verify` is a no-op.
+          dpkg-deb --ctrl-tarfile output/*.deb | tar -tf - | grep -qx './md5sums'
+          test "$(dpkg-deb -c output/*.deb | grep -c '^-')" = "$(dpkg-deb --ctrl-tarfile output/*.deb | tar -xOf - ./md5sums | wc -l)"
+          echo "md5sums: $(dpkg-deb --ctrl-tarfile output/*.deb | tar -xOf - ./md5sums | wc -l) files"
+      - name: Lintian (the .deb only)
+        run: |
+          # Never lint the .changes: `lmn73` is not a distribution lintian knows, so it would
+          # fail every build with E: bad-distribution-in-changes-file.
+          lintian --fail-on error output/*.deb
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages
           path: output/
           if-no-files-found: error
+
+  # The lock gates through a real `make deb` in the pinned image, as the build user. Proves K1
+  # end to end: a wheel pinned in the build lock, the runtime lock, both, or the uv lock, whose
+  # distribution ships executable bin/ scripts and a marker-writing .pth -- with a real name
+  # and hash, its "publication" simulated only in the throwaway copy -- is rejected BEFORE
+  # anything from a lock is installed, so `make deb` fails, ships no .deb, and none of its code
+  # runs (the marker stays absent), also under a poisoned caller environment (R1). The fast tier
+  # runs the same script without LOCK_GATES_DEB. Then scripts/tests/make_deb_checks.sh: a
+  # complete `make deb` of a dirty git checkout under the same poisoned environment (R1, R3,
+  # R4): it builds, warns about every uncommitted difference, packs exactly the tracked files
+  # with fixed modes and symlinks, runs nothing configured in .git, and refuses a worktree
+  # whose repository git cannot reach.
+  lock-gates-build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.resolve.outputs.image }}
+      options: --user root
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # The lock gate first (cold verification r3, F1): the tests below copy the committed
+      # lockfiles into their cases, so they run only if these pass. build-dep installs
+      # python3-venv from the Ubuntu archive (nothing from a lockfile); the gate installs its
+      # own uv from the verified uv lock.
+      - name: Lock gate (every lockfile, before anything from one is installed)
+        run: |
+          apt-get update -qq && apt-get build-dep -y -qq .
+          chown -R build:build .
+          runuser -u build -- env HOME=/home/build bash scripts/check-lockfiles.sh
+      - name: Every manipulated lock stops make deb, and no lock wheel runs first
+        run: |
+          runuser -u build -- env HOME=/home/build \
+            LOCK_GATES_DEB=1 LOCK_GATES_VERBOSE=1 bash scripts/tests/lock_gates.sh
+      - name: make deb of a dirty checkout under a poisoned environment (R1, R3, R4)
+        run: |
+          # As root in a checkout that belongs to `build`: git's ownership guard refuses it and
+          # nothing its .git configures runs as root (R3). Then the dirty build as `build`.
+          bash scripts/tests/make_deb_checks.sh guard build
+          runuser -u build -- env HOME=/home/build bash scripts/tests/make_deb_checks.sh
+
+  # The one failure mode of a packaging change that no other job would notice: a module of
+  # the control plane, the unit or the CLI link quietly falls out of the package, or a mode
+  # changes (dh_fixperms would make the wheels' .so files 0644), because debian/rules places
+  # things differently than the old hand-rolled dpkg-deb build. It would only show up on a
+  # school server. So every build is compared, path by path, against the newest published
+  # release: a path that disappears or changes mode/owner fails the build. Two venv rules:
+  # the own lmnradius-<version>.dist-info is compared under a fixed name, and a third-party
+  # path under site-packages that disappears (a lock bump) is reported, not failed -- the
+  # completeness of those is proven by `debian/venv-relocate --verify` (RECORD) and the
+  # freeze == lock gates of the build. This gate is permanent, and release.yml carries the
+  # same job (the run blocks are character-identical).
+  file-tree:
+    needs: package
+    runs-on: ubuntu-latest        # GitHub-hosted: gh is installed here, not in the container
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: packages
+          path: packages/
+      - name: Fetch the newest published release
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          mkdir -p previous
+          # Prefer the newest real release, fall back to the newest prerelease. Skipping is
+          # only legitimate when the repo has NO release at all: this gate stands between a
+          # silently shrunk package and a school server.
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+                  --json tagName,isDraft,isPrerelease \
+                  --jq '[.[] | select(.isDraft == false and .isPrerelease == false)][0].tagName // ""')
+          if [ -z "$tag" ]; then
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+                    --json tagName,isDraft --jq '[.[] | select(.isDraft == false)][0].tagName // ""')
+            [ -n "$tag" ] && echo "::warning::no full release yet, comparing against prerelease $tag"
+          fi
+          if [ -z "$tag" ]; then
+            if [ "$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq 'length')" != "0" ]; then
+              echo "::error::releases exist but none could be selected - refusing to skip"; exit 1
+            fi
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "::notice::first release of this package, nothing to compare against"
+            exit 0
+          fi
+          for i in 1 2 3; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' --dir previous && break
+            echo "download attempt $i failed, retrying"; sleep 10
+          done
+          test -n "$(ls previous/*.deb 2>/dev/null)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Compare the file tree with the released package
+        if: steps.prev.outputs.skip != '1'
+        env:
+          PREV_TAG: ${{ steps.prev.outputs.tag }}
+        run: |
+          set -euo pipefail          # without pipefail `tee` would swallow the exit code
+          # mode owner path, sorted. Directories are compared too, so an emptied or lost
+          # directory cannot go unnoticed. A symlink prints "path -> target"; the target is
+          # carried along, so a retargeted link (/usr/bin/lmnradius, the venv's python and
+          # lib64 links) is drift too.
+          norm() { dpkg-deb -c "$1" | awk '{t = ($7 == "->" ? " " $7 " " $8 : ""); print $1, $2, $6 t}' | LC_ALL=C sort; }
+          norm previous/*.deb > old.txt
+          norm packages/*.deb > new.txt
+          python3 - old.txt new.txt linuxmuster-radius lmnradius "$PREV_TAG" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import re
+          import sys
+
+          old_f, new_f, PKG, OWN, TAG = sys.argv[1:6]
+          SP = rf"opt/{PKG}/venv/lib/python3\.12/site-packages/"
+          # 1. the own dist-info carries the version: compare it under a fixed name.
+          DIST = re.compile(rf"^({SP}{OWN})-[^/]+\.dist-info")
+          # 2. third-party distributions come and go with every lock bump; their completeness
+          #    is proven by `debian/venv-relocate --verify` (RECORD) and the freeze == lock
+          #    gates of the build, so a path of theirs that disappears is reported, not failed.
+          #    Mode/owner is checked everywhere.
+          THIRD = re.compile(rf"^{SP}(?!{OWN}[/-])")
+          # Paths that may legitimately disappear. Add one ONLY together with the changelog
+          # sentence that explains it to admins.
+          ALLOW_GONE = set()
+
+
+          def read(name):
+              rows = {}
+              for line in open(name):
+                  mode, owner, path = line.rstrip("\n").split(" ", 2)
+                  if path == "./":  # the package root: dpkg never applies its mode
+                      continue
+                  rows[DIST.sub(r"\1-VERSION.dist-info", path.removeprefix("./"))] = (mode, owner)
+              return rows
+
+
+          old, new = read(old_f), read(new_f)
+          gone = sorted(set(old) - set(new))
+          added = sorted(set(new) - set(old))
+          changed = sorted(p for p in set(old) & set(new) if old[p] != new[p])
+          strict_gone = [p for p in gone if not THIRD.match(p) and p not in ALLOW_GONE]
+          print(f"## File tree vs {TAG}\n")
+          print(f"- released: {len(old)} entries, built: {len(new)} entries")
+          print(f"- third-party venv paths: {sum(1 for p in gone if THIRD.match(p))} gone, "
+                f"{sum(1 for p in added if THIRD.match(p))} added (lock changes, see RECORD check)")
+          for p in added:
+              if not THIRD.match(p):
+                  print(f"- added: `{p}`")
+          for p in strict_gone:
+              print(f"::error::file lost from the package: {p}")
+          for p in changed:
+              print(f"::error::mode or owner changed: {p}: {old[p]} -> {new[p]}")
+          if strict_gone or changed:
+              sys.exit(1)
+          print("\nfile tree: nothing lost, no mode or owner change")
+          PY
 
   install-smoke:
     needs: package
@@ -353,8 +551,14 @@ jobs:
           # thing that restarts it is `systemctl try-restart` inside the postinst's
           # `if [ -n "${2:-}" ]` branch, which exists only when dpkg passes an old version.
           grep -qE 'Unpacking linuxmuster-radius \([^)]+\) over \([^)]+\)' upgrade.log
-          # dpkg's own record of the action, independent of apt's wording.
-          grep -q ' upgrade linuxmuster-radius:' /var/log/dpkg.log
+          # dpkg's own record of the action, independent of apt's wording: exactly this
+          # step, from the released version to the built one (a reinstall of an equal version
+          # is logged as an upgrade too), and never a downgrade (--allow-downgrades above
+          # would let one through, and dpkg logs it as "upgrade" as well).
+          old_ver="$(dpkg-deb -f previous/*.deb Version)"
+          new_ver="$(dpkg-deb -f packages/*.deb Version)"
+          dpkg --compare-versions "$new_ver" ge "$old_ver"
+          grep -E " upgrade linuxmuster-radius:(all|amd64) ${old_ver//./\\.} ${new_ver//./\\.}\$" /var/log/dpkg.log
           after_pid="$(systemctl show -p MainPID --value linuxmuster-radius.service)"
           echo "postinst upgrade branch ran: MainPID $before_pid -> $after_pid"
           test "$before_pid" != "$after_pid"

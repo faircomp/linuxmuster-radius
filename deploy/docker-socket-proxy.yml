@@ -8,7 +8,7 @@
 # and restart the service. (ADR-012.)
 services:
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:v0.4.2   # fixed version instead of :latest (Renovate pins the @sha256 digest)
+    image: tecnativa/docker-socket-proxy:v0.4.2   # fixed version instead of :latest
     environment:
       CONTAINERS: "1"   # create/inspect/start/stop/remove/logs
       IMAGES: "1"       # pull the digest-pinned data-plane image

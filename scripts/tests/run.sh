@@ -3,16 +3,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Test aggregator for linuxmuster-radius. See docs/test-strategy.md and the
-# /test skill. Modes: lint | unit | quick (default) | e2e | all.
+# /test skill. Modes: gate | lint | unit | quick (default) | locks | e2e | all.
 # Each step is dependency-gated and skips cleanly when a toolchain is missing.
 # e2e/all refuse without LMNRADIUS_ALLOW_REAL=1 (protection against accidental runs).
+#
+# The lock gate (scripts/check-lockfiles.sh) runs FIRST in every mode but e2e, before anything
+# that could run a package from a lockfile (mypy plugins, pytest, a venv's tools, the lock
+# regression test), started as /bin/bash; the gate fixes its own PATH and drops VIRTUAL_ENV,
+# PYTHON*, UV_* and PIP_*, so neither an activated venv nor the checkout's .venv takes part in
+# it (K1/R1). If it fails, run.sh stops right there: nothing else runs. Only after it passed
+# are the control-plane tools of .venv (created by crabbox_bootstrap) put first on PATH for
+# lint and unit; the lock regression test (`locks`) cleans its environment like the gate.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
-
-# Prefer control-plane tools from the venv (created by crabbox_bootstrap)
-[ -x "$ROOT/.venv/bin/ruff" ] && export PATH="$ROOT/.venv/bin:$PATH"
 
 PASS=0; FAIL=0; SKIP=0
 pass(){ PASS=$((PASS + 1)); printf '  [PASS] %s\n' "$1"; }
@@ -25,6 +30,34 @@ run_step(){
   local name="$1" tool="$2"; shift 2
   if ! have "$tool"; then skip "$name" "$tool not installed"; return; fi
   if "$@"; then pass "$name"; else fail "$name"; fi
+}
+
+summary(){
+  echo
+  echo "$PASS passed, $FAIL failed, $SKIP skipped"
+  [ "$FAIL" -eq 0 ]
+}
+
+gate(){
+  echo "== lock gate =="
+  if /bin/bash scripts/check-lockfiles.sh; then
+    pass "lock gate"
+    # Prefer control-plane tools from the venv (created by crabbox_bootstrap), only now.
+    if [ -x "$ROOT/.venv/bin/ruff" ]; then export PATH="$ROOT/.venv/bin:$PATH"; fi
+  else
+    fail "lock gate"
+    echo "lock gate failed: run.sh stops here, nothing else runs (lint, unit, the lock" \
+      "regression test and e2e could all run code from a lockfile)"
+    summary
+    exit 1
+  fi
+}
+
+locks(){
+  echo "== lock gates regression test =="
+  # Tampered lockfiles must fail the lockfile check AND the venv build; needs /usr/bin/python3
+  # with venv and PyPI (CI runs it too, where it never skips).
+  run_step "lock gates" /usr/bin/python3 /bin/bash scripts/tests/lock_gates.sh
 }
 
 lint(){
@@ -43,7 +76,8 @@ lint(){
   fi
   if have shellcheck; then
     local sh=()
-    mapfile -t sh < <(git ls-files '*.sh' 2>/dev/null)
+    mapfile -t sh < <(git --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null \
+      ls-files '*.sh' 2>/dev/null)
     if [ "${#sh[@]}" -gt 0 ]; then
       # Warning level only: the info tier is noise here (SC2317 unreachable in
       # trap-cleanup helpers, SC2016 intentional envsubst SHELL-FORMAT quotes).
@@ -87,14 +121,14 @@ e2e(){
 
 mode="${1:-quick}"
 case "$mode" in
-  lint)  lint ;;
-  unit)  unit ;;
-  quick) lint; unit ;;
+  gate)  gate ;;
+  lint)  gate; lint ;;
+  unit)  gate; unit ;;
+  quick) gate; lint; unit; locks ;;
+  locks) gate; locks ;;
   e2e)   e2e ;;
-  all)   lint; unit; e2e ;;
-  *) echo "usage: run.sh [lint|unit|quick|e2e|all]" >&2; exit 2 ;;
+  all)   gate; lint; unit; locks; e2e ;;
+  *) echo "usage: run.sh [gate|lint|unit|quick|locks|e2e|all]" >&2; exit 2 ;;
 esac
 
-echo
-echo "$PASS passed, $FAIL failed, $SKIP skipped"
-[ "$FAIL" -eq 0 ]
+summary

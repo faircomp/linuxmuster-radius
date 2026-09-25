@@ -18,7 +18,7 @@ Alle `lmnradius`-Befehle sind ein dünner Client der REST-API (FastAPI, gebunden
 ## Installation (Control-Plane-Tooling)
 
 ```
-apt install ./linuxmuster-radius_<version>_all.deb     # oder aus dem lmn73-apt-Repo
+apt install ./linuxmuster-radius_<version>_amd64.deb     # oder aus dem lmn73-apt-Repo
 systemctl status linuxmuster-radius                    # sollte "active" sein
 ```
 
@@ -29,7 +29,8 @@ den Dienst — gebunden an **`127.0.0.1:8080`**. Verzeichnisse: `secrets_dir`
 `0700`), `instances_dir` (`/var/lib/linuxmuster-radius/instances`, als Git-Repo = Change-Log:
 jedes `create`/`set-ldap-ca`/`rm` ist ein Commit, `sudo -u lmnradius git -C
 /var/lib/linuxmuster-radius/instances log` zeigt die Historie; die `postinst` legt Repo
-und Identität als `lmnradius` an und holt beim Upgrade liegengebliebene Datensätze nach).
+und Identität als `lmnradius` an, schaltet git-Hintergrundwartung im Repo ab
+(`maintenance.auto false`, `gc.auto 0`) und holt beim Upgrade liegengebliebene Datensätze nach).
 
 ## Erstinbetriebnahme (einmalig)
 
@@ -164,7 +165,7 @@ lmnradius rollback   default-school              # auf das letzte bekannt-gute I
 Das Update zieht den neuen Digest, ersetzt den Container, wartet auf `healthy` (winbind-
 Trust **und** radiusd erreichbar) und **rollt bei Fehler automatisch zurück** — die Schule
 bleibt online. Welcher Digest in Produktion gehört, entscheidet ein **gemergter
-Renovate-PR** (nie Auto-Merge). Bei einem **`.deb`-Upgrade** ruft die `postinst`
+Digest-Bump-PR** (nie Auto-Merge; von Hand, solange Renovate abgeschaltet ist). Bei einem **`.deb`-Upgrade** ruft die `postinst`
 automatisch `update-all` auf (best-effort; Instanzen auf dem Default werden übersprungen,
 die apt-Transaktion scheitert daran nie).
 
@@ -296,7 +297,7 @@ Zu sichern:
 Frischer Host → laufende Instanzen:
 
 ```
-apt install ./linuxmuster-radius_<version>_all.deb          # Dienst kommt hoch
+apt install ./linuxmuster-radius_<version>_amd64.deb          # Dienst kommt hoch
 # API-Token behalten: config.yml zurückspielen ODER das neue Token akzeptieren
 cp -a <backup>/secrets/*   /etc/linuxmuster-radius/secrets/      # Betriebs-Secrets
 cp -a <backup>/certs/*     /etc/linuxmuster-radius/certs/        # EAP-CA + Server-Keys

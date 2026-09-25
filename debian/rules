@@ -1,0 +1,45 @@
+#!/usr/bin/make -f
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The hermetic venv is built into debian/$(PKG)$(DEST) without root and relocated to
+# $(DEST) (debian/venv-relocate). Every file pip installed must reach the .deb unchanged:
+# debhelper tools that rewrite files (strip, dwz, strip-nondeterminism) or modes (fixperms)
+# stay out of the venv, and --verify proves it against RECORD before dh_builddeb.
+
+include /usr/share/dpkg/pkg-info.mk
+
+PKG  := linuxmuster-radius
+DEST := /opt/$(PKG)/venv
+ROOT := $(CURDIR)/debian/$(PKG)
+
+%:
+	dh $@
+
+# Nothing to configure, build or test here (the fast tier tests the code); overriding also
+# keeps debhelper's makefile build system from calling the top-level Makefile (recursion).
+override_dh_auto_configure override_dh_auto_build override_dh_auto_test:
+	@:
+
+override_dh_auto_install:
+	bash packaging/build-venv.sh $(ROOT)$(DEST)
+	debian/venv-relocate $(ROOT) $(DEST)
+
+override_dh_auto_clean:
+	rm -rf controlplane/build controlplane/*.egg-info
+
+# Stripping, dwz and strip-nondeterminism would change files pip recorded in RECORD;
+# dh_makeshlibs must not publish the wheels' private libraries as shlibs.
+override_dh_strip override_dh_dwz override_dh_strip_nondeterminism override_dh_makeshlibs:
+	@:
+
+# The maintainer scripts handle the units by hand, unchanged since 7.3.x (the plan, §4).
+override_dh_installsystemd:
+	@:
+
+# The wheels' .so files are 0755 as pip installed them; dh_fixperms would make them 0644.
+override_dh_fixperms:
+	dh_fixperms -X$(DEST)
+
+execute_before_dh_builddeb:
+	debian/venv-relocate --verify $(ROOT) $(DEST)

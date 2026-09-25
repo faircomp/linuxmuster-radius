@@ -31,5 +31,5 @@ radius_secret: default-school.radius
 # create --ldap-ca` / `set-ldap-ca`). Mandatory for ldaps:// since 7.3.1; null only
 # on records created earlier (then listed as "LDAPS unverified").
 ldap_ca: ldap-ca.pem
-# Digest-pinned in production (Renovate, P5). The 64-hex digest below is illustrative.
+# Digest-pinned in production (P5). The 64-hex digest below is illustrative.
 image: ghcr.io/faircomp/linuxmuster-radius@sha256:7385d3a64c3d98afa33577473c6b065f2a6a2ef88fa7ff70117ab6262118a77a

@@ -55,20 +55,41 @@ SPDX-License-Identifier: GPL-3.0-or-later
   die Domäne (Konto + Record gelöscht) und entfernt das Volume.
 - **Manipulierte Build-Eingaben (Lieferkette)** — das `.deb` wird auf Schulservern als
   root installiert; was in den Build-Job gelangt, landet im Paket. Bis 7.3.2 holte
-  `build-deb.sh` die Python-Abhängigkeiten ungepinnt und ohne Prüfsumme von PyPI: eine
+  der Paketbau die Python-Abhängigkeiten ungepinnt und ohne Prüfsumme von PyPI: eine
   kompromittierte oder brechende Fassung wäre ohne Codeänderung ausgeliefert worden, zwei
   Bauten desselben Tags konnten sich unterscheiden. **Gegenmaßnahme (7.3.3):** das venv
   entsteht nur aus `controlplane/requirements.lock` und `build-requirements.lock` (Version
   und sha256 je Datei, nur Fassungen, die mindestens eine Woche auf PyPI liegen, `--require-hashes --only-binary :all: --no-deps`, eigenes Paket
   offline), danach `pip check`, und der Bau bricht ab, wenn das venv nicht exakt den
-  Lockfiles entspricht; der CI-Job `lockfile` prüft die Lockfiles gegen
-  `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per Renovate-PR, den
-  ein Mensch merged (ADR-016). Das Build-Image (`lmndev-runner`, fremde Org, wöchentlich
+  Lockfiles entspricht. **Nachgehärtet (7.3.4):** bis 7.3.3 passierte eine eingerückte
+  `name @ file:///…whl#sha256=…`-Zeile die Lockfile-Prüfung, und der venv-Abgleich stürzte in
+  einer Prozess-Substitution ab, ohne den Bau anzuhalten — das fremde Paket lag im `.deb`
+  (kalte Prüfung Stufe A, F2). Jetzt lassen Prüfung und Bau nur Zeilen zu, die uv schreibt,
+  der Bau prüft jede Prüfsumme gegen PyPI, vergleicht `pip freeze` fehlerfest und verlangt,
+  dass jede Distribution im venv gebraucht wird. **Nachgehärtet (7.3.4, K1, Runden 3/4):**
+  nichts aus den Paket-Sperrdateien (`requirements.lock`, `build-requirements.lock`) wird
+  installiert und kein Programm aus einem venv daraus läuft, bevor alle drei Sperrdateien
+  voll geprüft sind (Grammatik, Hashes von PyPI, Pins = Hülle der Eingaben); uv kommt aus der
+  uv-Sperrdatei erst, nachdem diese geprüft ist (genau das uv aus `uv-requirements.in`, Hashes
+  von PyPI). Das gilt im Bau, im CI-Fast-Tier, in den CI-Jobs `lockfile` (ci.yml und Release)
+  und `lock-gates-build` und lokal in `run.sh` (bricht nach rotem Tor ab); die Gegenproben der
+  Lock-Tests installieren nur Fixture-Sperrdateien. Das eine Tor ist
+  `scripts/check-lockfiles.sh`, mit eigenem, isoliertem uv. PATH, aktiviertes venv, `.venv`
+  im Checkout und `PYTHON*`/`UV_*`/`PIP_*` des Aufrufers steuern die Tore nicht; nicht
+  neutralisiert (Grenze) sind `BASH_ENV`, exportierte Shell-Funktionen und Proxy-/CA-Variablen
+  — wer sie setzt, führt ohnehin Code als der Aufrufer aus.
+  `make deb` baut nur versionierte Dateien, führt nichts aus der `.git`-Konfiguration des
+  Checkouts aus (kein fsmonitor, keine Hooks, keine Filter) und verzichtet nicht auf git's
+  Eigentümerschutz. `scripts/tests/lock_gates.sh` und `make_deb_checks.sh` halten die Fälle
+  fest (mit Gegenproben ohne Tor); neue Fassungen nur per PR, den ein Mensch
+  merged (ADR-016; von Hand, solange Renovate abgeschaltet ist). Das Build-Image (`lmndev-runner`, fremde Org, wöchentlich
   neu gebaut, Build als root) steht per Digest, jede Action per Commit-SHA; das Release
   entsteht als Entwurf und wird erst nach dem sha256-Abgleich der Assets veröffentlicht
   (ADR-017).
   **Restlücke:** wer einen Bump-PR merged, vertraut der neuen Fassung — die Prüfsumme belegt nur, dass genau diese Datei gebaut wird, nicht, dass sie
-  gutartig ist. **Verifikation:** zwei Bauten ergeben dieselbe Paketliste, `pip freeze`
+  gutartig ist. Und: eine andere echte Fassung eines gepinnten Pakets (älter oder neuer, mit
+  echten Hashes), die die deklarierten Anforderungen erfüllt, besteht alle Tore — nur die
+  Review des Sperrdatei-Diffs fängt sie. **Verifikation:** zwei Bauten ergeben dieselbe Paketliste, `pip freeze`
   im venv = Lockfile; Negativtests des Lockfile-Checks (`work/campaign/stufe-a-radius.md`
   im Hub).
 
