@@ -274,20 +274,32 @@ Fehler bricht ab, keine Prozess-Substitution mehr, die eine Ausnahme verschluckt
 verlangt, dass jede installierte Distribution von `lmnradius` oder pip gebraucht wird (ein
 zusätzlicher Pin mit echten Hashes fiele sonst durch). `scripts/tests/lock_gates.sh`
 (Fast-Tier) hält die Fälle dauerhaft fest.
-Weiter nachgehärtet (7.3.4, Nachbesserung K1): ein Wheel aus der Build-Sperrdatei kann
-`bin/`-Skripte und eine `.pth` mitbringen; würde es vor der Mengen-/Hüllen-Prüfung installiert,
-liefe die `.pth` beim Bau des eigenen Wheels. Darum läuft **kein** Interpreter aus einem
-Sperrdatei-venv, bevor beide Sperrdateien vollständig geprüft sind — auch die Hülle
-(`check-lockfiles.sh`, uv-Neuauflösung). `uv` selbst kommt hash-gepinnt aus
-`controlplane/uv-requirements.lock` (nur `uv`, isoliertes venv, absoluter Pfad), nie aus einem
-ungepinnten `pip install uv==…`. Ein zusätzlicher Pin mit echten Hashes wird so vor dem venv
-abgewiesen (nachgewiesen: die K1-Fälle in `lock_gates.sh`, `make deb` scheitert, die Marker-
-`.pth` läuft nie).
-`scripts/check-lockfiles.sh` (CI-Job `lockfile`) beweist, dass die Lockfiles zu ihren
-Quellen passen (eine Fassung jünger als sieben Tage fällt dabei durch), jede Prüfsumme eine
-von PyPI für genau diese Fassung ist und jede Fassung ein Wheel für die Zielplattform hat
-(CPython 3.12, glibc 2.39, x86_64). Neue Fassungen kommen per PR, ohne Automerge (von
-Hand, solange Renovate abgeschaltet ist). **Begründung:** ohne Pins zog jeder Release-Bau die
+Weiter nachgehärtet (7.3.4, Nachbesserung K1 und Runde 3): ein Wheel aus einer Sperrdatei
+kann `bin/`-Skripte und eine `.pth` mitbringen; würde es vor der Mengen-/Hüllen-Prüfung
+installiert, liefe sein Code (die `.pth` beim Bau des eigenen Wheels, im CI-Fast-Tier seine
+`bin/`-Werkzeuge im PATH). Darum ist `scripts/check-lockfiles.sh` **das** Lock-Tor, und jeder
+Verbraucher ruft es auf, bevor irgendetwas aus einer Sperrdatei installiert wird: der
+Fast-Tier (erster Schritt), der Job `lockfile` in ci.yml und release.yml (nur das Tor),
+`packaging/build-venv.sh` (also `make deb`, CI `package`, Release-`build`) und
+`scripts/tests/run.sh`. Es prüft alle drei Sperrdateien: Grammatik; die uv-Sperrdatei hält
+genau das `uv==` aus `uv-requirements.in` mit von PyPI veröffentlichten Hashes (nur stdlib);
+erst dann installiert es dieses uv in ein eigenes, isoliertes venv und ruft es per absolutem
+Pfad auf; uv löst `pyproject.toml`/`build-requirements.in` neu auf, die Pins müssen genau
+diese Hülle sein, und jeder Hash muss von PyPI für genau diese Fassung stammen. Die Tore
+hängen nicht von der Umgebung des Aufrufers ab: fester PATH ohne venv-`bin/`,
+`/usr/bin/python3 -I`, `VIRTUAL_ENV`/`PYTHON*`/`UV_*`/`PIP_*` entfernt, uv mit `--python
+/usr/bin/python3 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). Ein
+zusätzlicher Pin mit echten Hashes wird so abgewiesen, bevor sein Code läuft (nachgewiesen:
+die K1-, R1- und R2-Fälle in `scripts/tests/lock_gates.sh`, die Marker entstehen nie; die
+Gegenproben ohne Tor erzeugen sie).
+`scripts/check-lockfiles.sh` beweist außerdem, dass die Lockfiles zu ihren
+Quellen passen (eine Fassung jünger als sieben Tage fällt dabei durch) und jede Fassung ein
+Wheel für die Zielplattform hat (CPython 3.12, glibc 2.39, x86_64). **Grenze:** Die Pins
+werden nach Namen mit der Hülle verglichen, die Auflösung bevorzugt die gepinnten Fassungen.
+Eine andere echte Fassung eines gepinnten Pakets (älter **oder neuer**, mindestens eine Woche
+alt, mit ihren echten Hashes), die die deklarierten Anforderungen erfüllt, besteht darum jedes
+Tor; nur die Review des Sperrdatei-Diffs fängt sie. Neue Fassungen kommen per PR, ohne
+Automerge (von Hand, solange Renovate abgeschaltet ist). **Begründung:** ohne Pins zog jeder Release-Bau die
 neueste PyPI-Fassung ohne Prüfsumme; Bauten waren nicht reproduzierbar und eine
 kompromittierte Fassung wäre unbemerkt in ein root-installiertes Paket gelangt.
 **Verworfene Alternativen:** Pins ohne Hashes (schützen nicht gegen eine ausgetauschte

@@ -11,6 +11,9 @@
     lockfile_gate.py freeze [--own NAME] [--drop NAME] FREEZE LOCK...
         FREEZE (the output of `pip freeze --all`) holds exactly the pins of the LOCKs, minus
         --drop, plus --own; every line is a plain name==version pin.
+    lockfile_gate.py only NAME LOCK [--input IN]
+        LOCK holds exactly one pin, NAME (the tool lock of the resolver uv); with --input, its
+        version is the one IN (e.g. uv-requirements.in) pins with ==.
     lockfile_gate.py closure --root NAME... [--path DIR]
         Run with the venv's python: every installed distribution is required, directly or
         through others (markers and extras evaluated here), by one of the roots. An extra
@@ -153,10 +156,15 @@ def cmd_lint(args: argparse.Namespace) -> int:
 
 
 def fetch_json(url: str) -> dict:
-    """GET a JSON document; transient errors are retried, a 404 is final."""
+    """GET a JSON document; transient errors are retried briefly, a 404 is final.
+
+    Short on purpose: without network the build must fail within about a minute, not after
+    retrying every pin for minutes (cold verification r2, F9). cmd_pypi stops at the first
+    pin it cannot read.
+    """
     for attempt in (1, 2, 3):
         try:
-            with urllib.request.urlopen(url, timeout=30) as resp:
+            with urllib.request.urlopen(url, timeout=10) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as e:
             if e.code == 404 or attempt == 3:
@@ -164,7 +172,7 @@ def fetch_json(url: str) -> dict:
         except (urllib.error.URLError, TimeoutError):
             if attempt == 3:
                 raise
-        time.sleep(attempt * 5)
+        time.sleep(attempt * 2)
     raise AssertionError("unreachable")
 
 
@@ -185,12 +193,13 @@ def cmd_pypi(args: argparse.Namespace) -> int:
             errors += errs
             continue
         for pin in pins:
-            # Any answer but the release's file list fails closed.
+            # Any answer but the release's file list fails closed, and at once: an unreachable
+            # PyPI would only fail every further pin after the same retries.
             try:
                 known = published(pin)
             except Exception as e:
                 errors.append(f"{path}: {pin}: cannot read PyPI: {e}")
-                continue
+                return report(errors, "")
             for h in pin.hashes:
                 if h in known:
                     checked += 1
@@ -284,7 +293,11 @@ def cmd_closure(args: argparse.Namespace) -> int:
 
 
 def cmd_only(args: argparse.Namespace) -> int:
-    """Fail unless LOCK holds exactly one pin, named NAME (the tool lock, e.g. uv)."""
+    """Fail unless LOCK holds exactly one pin, named NAME (the tool lock, e.g. uv).
+
+    With --input, the pin's version must be the one the input file pins (NAME==VERSION, its
+    only requirement): the closure of a single ==-pinned tool without dependencies is that pin.
+    """
     errors: list[str] = []
     pins, errs = parse(args.lock)
     errors += errs
@@ -293,6 +306,17 @@ def cmd_only(args: argparse.Namespace) -> int:
         errors.append(
             f"{args.lock}: expected exactly the one pin {args.name}, found {names or 'none'}"
         )
+    if args.input and len(pins) == 1:
+        reqs = [
+            line.split("#", 1)[0].strip()
+            for line in Path(args.input).read_text(encoding="ascii").splitlines()
+        ]
+        reqs = [r for r in reqs if r]
+        want = f"{canonical(args.name)}=={pins[0].version}"
+        if reqs != [want]:
+            errors.append(
+                f"{args.lock}: pins {pins[0]}, but {args.input} asks for {reqs or 'nothing'}"
+            )
     return report(
         errors,
         f"only ok: {args.lock} holds exactly {args.name}=={pins[0].version if pins else '?'}",
@@ -308,6 +332,9 @@ def main() -> int:
     p = sub.add_parser("only")
     p.add_argument("name")
     p.add_argument("lock")
+    p.add_argument(
+        "--input", help="the .in file whose one NAME==VERSION the pin must equal"
+    )
     p.set_defaults(func=cmd_only)
     p = sub.add_parser("pypi")
     p.add_argument("locks", nargs="+")

@@ -59,14 +59,23 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   linuxmuster-readonlydc (the hub keeps the reference); change it there, not here alone.
 - **Python dependencies** are locked with hashes (ADR-016): `controlplane/requirements.lock`
   (from `pyproject.toml`) and `controlplane/build-requirements.lock` (pip + setuptools).
-  `controlplane/uv-requirements.lock` pins the resolver `uv` (only `uv`, all PyPI hashes);
-  every place that needs uv installs it hash-pinned from that file, never a bare
-  `pip install uv==…`. After changing dependencies, re-run the command in the lockfile's
-  header inside `controlplane/` (needs `uv`) and check with `bash scripts/check-lockfiles.sh`.
-  Never hand-edit a lockfile. No program from a lockfile-populated venv runs, and no such
-  `bin/` is on `PATH`, before both locks are fully verified (grammar, every hash on PyPI,
-  pin set == closure of the declared inputs); `packaging/build-venv.sh` enforces that before
-  it creates the venv. Renovate is disabled (Kevin, 2026-09-25), so locks, digests, action
+  `controlplane/uv-requirements.lock` pins the resolver `uv` (exactly the `uv==` of
+  `uv-requirements.in`, all PyPI hashes). After changing dependencies, re-run the command in
+  the lockfile's header inside `controlplane/` (needs `uv`) and check with
+  `bash scripts/check-lockfiles.sh`. Never hand-edit a lockfile.
+  `scripts/check-lockfiles.sh` is **the lock gate**, and every consumer runs it before
+  anything from a lockfile is installed: the CI fast tier (first step), the `lockfile` job
+  of ci.yml and release.yml (nothing else in it), `packaging/build-venv.sh` (so `make deb`,
+  CI `package`, the release build) and `scripts/tests/run.sh` (before lint/unit). It verifies
+  all three locks — grammar, every hash on PyPI, pin set == closure of the declared inputs
+  (uv re-resolves `pyproject.toml`/`build-requirements.in`) — and installs the uv it needs
+  itself, from the verified uv lock into an isolated venv, called by absolute path. The
+  gates run `/usr/bin/python3 -I`, set a fixed PATH and drop `VIRTUAL_ENV`, `PYTHON*`,
+  `UV_*` and `PIP_*`, so an activated venv or a `.venv` in the checkout takes no part.
+  Limit: pins are compared with the closure by name; another real release of a pinned
+  package (older or newer, a week old, genuine hashes) that satisfies the declared
+  requirements passes every gate — only the review of the lockfile diff catches it.
+  Renovate is disabled (Kevin, 2026-09-25), so locks, digests, action
   SHAs and CI tool pins are raised by hand in a reviewed PR.
 - **Maintainer string** everywhere: `Kevin Stenzel <mail@kevin-stenzel.de>`.
 
@@ -227,8 +236,10 @@ with **Docker**. **crabbox** leases an ephemeral Proxmox VM for this (provider i
 `.claude/settings.json`, token only in the gitignored `.claude/settings.local.json`;
 `crabbox doctor`). Rules/details: the `/test` skill (`.claude/skills/test/SKILL.md`).
 
-- **One aggregate runner:** `bash scripts/tests/run.sh [lint|unit|quick|e2e|all]`
-  (created in P0/P1). `quick` (default) = lint + unit; `e2e`/`all` run the
+- **One aggregate runner:** `bash scripts/tests/run.sh [gate|lint|unit|quick|locks|e2e|all]`
+  (created in P0/P1). Every mode but `e2e` runs the lock gate first (network needed); if it
+  fails, lint and unit are skipped. `quick` (default) = gate + lint + unit + the lock
+  regression test; `e2e`/`all` run the
   Docker suites and **refuse without `LMNRADIUS_ALLOW_REAL=1`**. Summary:
   `N passed, M failed, K skipped` (exit ≠ 0 on failure); steps dep-gated.
 - **Box lifecycle:** `crabbox warmup` → `crabbox run --id <slug> -- 'bash scripts/tests/crabbox_bootstrap.sh'`

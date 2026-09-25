@@ -50,16 +50,27 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"        # = Ubuntu 24.04 / lmn73
+      # K1/R2: the lock gate is the first step, before anything from a lockfile is installed.
+      # It verifies all three lockfiles (grammar, uv lock == the published uv of
+      # uv-requirements.in, every hash published by PyPI, pins == closure of the declared
+      # inputs) with /usr/bin/python3 -I and a uv it installs itself from the verified uv lock
+      # into an isolated venv; it ignores PATH (setup-python's bin/ is first on it), VIRTUAL_ENV,
+      # PYTHON*, UV_* and PIP_*. A planted package in any lock stops the job here, so it is
+      # never installed into the interpreter below whose bin/ is on PATH.
+      # scripts/tests/lock_gates.sh (R2) replays this step and the next word for word.
+      - name: Lock gate (every lockfile, before anything from one is installed)
+        run: bash scripts/check-lockfiles.sh
       # The gate tools are PINNED on purpose: an unpinned `pip install ruff` picks up
       # whatever released last, and a linter that widens its default rule set turns the
       # pipeline red without a single line of our code changing (exactly what happened
       # on 2026-08-04). Pinned == the developer's local result == CI's result. The pins are
       # raised by hand in a reviewed PR, so upgrading stays a deliberate step.
       # The runtime dependencies come from the hash-pinned lockfile the .deb is built from,
-      # installed AFTER the tools so no tool can move them: pytest and mypy see exactly
-      # the versions that ship (and the ones a lockfile bump proposes), not
-      # whatever PyPI serves today. pip check: the tools still fit the locked versions.
-      - name: Install control-plane (locked dependencies) + tools
+      # verified by the step above, installed AFTER the tools so no tool can move them:
+      # pytest and mypy see exactly the versions that ship (and the ones a lockfile bump
+      # proposes), not whatever PyPI serves today. pip check: the tools still fit the locked
+      # versions. uv is not installed here: the gate brings its own.
+      - name: Install tools + control plane (locked dependencies)
         run: |
           pip install \
             ruff==0.15.21 \
@@ -68,9 +79,6 @@ jobs:
             pytest==9.1.1 \
             types-PyYAML==6.0.12.20260906 \
             pytest-asyncio
-          # uv is the lock gates' resolver; install it hash-pinned from a file that holds only
-          # uv (K1), never a bare `pip install uv==...` that trusts whatever hash PyPI serves.
-          pip install --require-hashes --only-binary :all: --no-deps -r controlplane/uv-requirements.lock
           pip install --require-hashes --only-binary :all: --no-deps -r controlplane/requirements.lock
           pip install --no-deps ./controlplane
           pip check
@@ -83,8 +91,10 @@ jobs:
       - name: pytest
         run: pytest -q controlplane/tests
       # Tampered lockfiles (an indented URL requirement, --extra-index-url, removed or changed
-      # hashes, an extra pin, a pin without hash, ...) must fail scripts/check-lockfiles.sh AND
-      # packaging/build-venv.sh, for the expected reason. Needs uv and PyPI; never skips.
+      # hashes, an extra pin, a pin without hash, a planted package in any lock, ...) must fail
+      # scripts/check-lockfiles.sh AND packaging/build-venv.sh, for the expected reason, without
+      # running any of the planted code, also under a poisoned caller environment (R1) and
+      # through the lock steps of ci.yml/release.yml (R2). Needs PyPI; never skips.
       - name: Lockfile gates refuse tampered lockfiles
         run: bash scripts/tests/lock_gates.sh
       # debian/venv-relocate has no .py extension, so `ruff check .` does not see it.
@@ -101,23 +111,22 @@ jobs:
       - name: reuse (license compliance)
         run: reuse lint
 
-  # Only this job re-resolves the lockfiles: it notices a lock that no longer matches
-  # pyproject.toml or build-requirements.in, a pin younger than seven days, or a locked version
-  # without a wheel for the target (CPython 3.12, glibc 2.39, x86_64). The build refuses a
-  # malformed lockfile, a hash PyPI does not publish and any venv drift on its own
-  # (packaging/build-venv.sh).
+  # The lock gate on its own: it notices a malformed lockfile, a uv lock that is not exactly
+  # the published uv of uv-requirements.in, a lock that no longer matches pyproject.toml or
+  # build-requirements.in (an extra or missing pin), a pin younger than seven days, a hash PyPI
+  # does not publish, or a locked version without a wheel for the target (CPython 3.12,
+  # glibc 2.39, x86_64). The fast tier and the build (packaging/build-venv.sh) run the same
+  # gate first; release.yml carries this job character for character.
   lockfile:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
+      # Nothing is installed before or around it (R2): the gate verifies the uv lock with the
+      # stdlib, installs uv from it into an isolated venv of its own and calls it by absolute
+      # path, with /usr/bin/python3 -I (the runner's Python 3.12), a fixed PATH and no
+      # UV_*/PIP_* variables.
       - name: Lockfiles match their sources, PyPI and the target platform
-        run: |
-          # uv hash-pinned from the uv-only lock (K1), not a bare `pip install uv==...`.
-          pip install --require-hashes --only-binary :all: --no-deps -r controlplane/uv-requirements.lock
-          bash scripts/check-lockfiles.sh
+        run: bash scripts/check-lockfiles.sh
 
   resolve:
     runs-on: ubuntu-latest
