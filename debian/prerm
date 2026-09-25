@@ -8,4 +8,5 @@ set -e
 if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
     systemctl disable --now linuxmuster-radius.service || true
 fi
+#DEBHELPER#
 exit 0
