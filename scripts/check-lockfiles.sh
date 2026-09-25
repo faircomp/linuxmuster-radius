@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Proves that the hash-pinned lockfiles under controlplane/ still match their sources and
-# the target platform. packaging/build-deb.sh installs them with --no-deps, so nothing
+# the target platform. packaging/build-venv.sh installs them with --no-deps, so nothing
 # else would notice a dependency added to pyproject.toml without re-locking.
 #   1. The header records the canonical command (the one Renovate re-runs on a bump).
 #      --exclude-newer=P7D: only releases that have been on PyPI for at least a week, the
@@ -11,7 +11,7 @@
 #   2. Re-resolving with that command, preferring the locked versions, yields the same pins
 #      (so a pin younger than seven days fails here).
 #   3. Resolving strictly for the target -- CPython 3.12 on Ubuntu 24.04 (glibc 2.39,
-#      x86_64), wheels only, as build-deb.sh installs -- yields the same pins, so every
+#      x86_64), wheels only, as build-venv.sh installs -- yields the same pins, so every
 #      locked version has a wheel the build can use. (Renovate refuses --python-platform
 #      and --only-binary in the header, hence this second resolution.)
 #   4. Every hash in a lockfile is one PyPI publishes for that exact version. This needs a

@@ -55,7 +55,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   die Domäne (Konto + Record gelöscht) und entfernt das Volume.
 - **Manipulierte Build-Eingaben (Lieferkette)** — das `.deb` wird auf Schulservern als
   root installiert; was in den Build-Job gelangt, landet im Paket. Bis 7.3.2 holte
-  `build-deb.sh` die Python-Abhängigkeiten ungepinnt und ohne Prüfsumme von PyPI: eine
+  der Paketbau die Python-Abhängigkeiten ungepinnt und ohne Prüfsumme von PyPI: eine
   kompromittierte oder brechende Fassung wäre ohne Codeänderung ausgeliefert worden, zwei
   Bauten desselben Tags konnten sich unterscheiden. **Gegenmaßnahme (7.3.3):** das venv
   entsteht nur aus `controlplane/requirements.lock` und `build-requirements.lock` (Version

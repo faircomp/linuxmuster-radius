@@ -45,7 +45,7 @@ VER=$(curl -fsSL https://api.github.com/repos/faircomp/linuxmuster-radius/releas
       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 : "${VER:?konnte die neueste Version nicht von der GitHub-API lesen - VER=7.3.N von Hand setzen}"
 curl -fsSLo lmnradius.deb \
-  https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_all.deb
+  https://github.com/faircomp/linuxmuster-radius/releases/download/v${VER}/linuxmuster-radius_${VER}_amd64.deb
 sudo apt install -y ./lmnradius.deb
 lmnradius health                                            # {"status":"ok"}
 ```

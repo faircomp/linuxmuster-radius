@@ -254,7 +254,7 @@ radius-and-ad.md § 3 und threat-model.md). **Quelle:** FreeRADIUS-Wiki „Rlm_l
 --python-version=3.12 --exclude-newer=P7D` erzeugt (nur Fassungen, die mindestens eine Woche
 auf PyPI liegen; in diesem Fenster fallen kompromittierte Uploads meist auf): `controlplane/requirements.lock` (Laufzeit, aus
 `pyproject.toml`) und `controlplane/build-requirements.lock` (pip selbst und setuptools,
-aus `build-requirements.in`). `build-deb.sh` installiert sie mit `--require-hashes
+aus `build-requirements.in`). `packaging/build-venv.sh` installiert sie mit `--require-hashes
 --only-binary :all: --no-deps`, baut das eigene Paket offline zum Wheel (`--no-index
 --no-build-isolation`) und installiert es per Namen (kein Build-Pfad in `direct_url.json`),
 prüft mit `pip check`, entfernt setuptools wieder und bricht ab, wenn `pip freeze --all`

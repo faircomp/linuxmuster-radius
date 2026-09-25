@@ -27,7 +27,7 @@ assumptions in [`docs/threat-model.md`](docs/threat-model.md), the decisions in
 | CLI | `controlplane/lmnradius/cli.py` | Python · Typer · httpx (thin client of the REST API, **no direct Docker**) |
 | EAP-CA / Cert manager | `controlplane/lmnradius/ca.py` | Private single-purpose EAP-CA (`ca init` / `cert issue` / `ca export`) |
 | E2E / Deploy | `deploy/` | docker-compose (Samba AD DC + joined FreeRADIUS + `eapol_test`), instance YAML, client GPO/MDM templates |
-| Packaging | `packaging/` (`make deb`), `debian/changelog` | `.deb` via `packaging/build-deb.sh` (hermetic venv under `/opt`, only from the hash-pinned lockfiles `controlplane/*.lock`), hardened systemd service (lmn73 layout) |
+| Packaging | `debian/` (`make deb` = `dpkg-buildpackage`), `packaging/` | debhelper 13 package; `packaging/build-venv.sh` builds the hermetic venv (only from the hash-pinned lockfiles `controlplane/*.lock`) into the package tree, `debian/venv-relocate` makes it correct for `/opt/linuxmuster-radius/venv`; hardened systemd service (lmn73 layout) |
 | Tests | `scripts/tests/` | `run.sh` aggregator; heavy tier on **crabbox** (`eapol_test` E2E) |
 
 > **The stack is deliberately Python** (linuxmuster-api7/webui7 are likewise FastAPI/
@@ -40,17 +40,23 @@ This is one of Kevin's own linuxmuster.net packages. The development hub is
 conventions are `../../docs/paket-konventionen.md` there. The rules that bite here:
 
 - **Version:** the top entry of `debian/changelog` is the only hand-edited version
-  (`7.3.N`, distribution `lmn73`, no `-0` revision). `packaging/build-deb.sh`
-  (`dpkg-parsechangelog`), `controlplane/setup.py` (`pyproject.toml` is `dynamic`) and
+  (`7.3.N`, distribution `lmn73`, no `-0` revision). `dpkg-buildpackage` (the .deb),
+  `controlplane/setup.py` (`pyproject.toml` is `dynamic`) and
   `GET /v1/version` (`importlib.metadata`) derive from it — never write a version
   anywhere else (not in `docs/install.md` either). Never bump it outside a release:
   Kevin sets it and tags `v7.3.N`; `release.yml` refuses a tag that does not match
   the changelog.
 - **Changelog:** one bullet in the top block of `debian/changelog` per user-visible change,
   in the same PR, written for admins in English. There is no `CHANGELOG.md`.
-- **Build:** `make deb` (wraps `packaging/build-deb.sh`; needs root, so run it in
-  `ghcr.io/linuxmuster/lmndev-runner:24.04` like CI does, pinned by digest — the command is
-  in the `Makefile`; never reference the image by tag alone).
+- **Build:** `make deb` = `dpkg-buildpackage` (debhelper 13, `Rules-Requires-Root: no`). It
+  writes `../linuxmuster-radius_<version>_amd64.deb` plus `.changes`, `.buildinfo`, `.dsc` and
+  the source tarball **next to** the checkout. Build it in
+  `ghcr.io/linuxmuster/lmndev-runner:24.04` like CI does, pinned by digest — the command is in
+  the `Makefile`; never reference the image by tag alone. `debian/rules` keeps debhelper's
+  file-changing tools (strip, dwz, fixperms, ...) out of the venv, and
+  `debian/venv-relocate --verify` fails the build if any pip-installed file changed.
+  `debian/venv-relocate` is shared byte-for-byte with linuxmuster-squid and
+  linuxmuster-readonlydc (the hub keeps the reference); change it there, not here alone.
 - **Python dependencies** are locked with hashes (ADR-016): `controlplane/requirements.lock`
   (from `pyproject.toml`) and `controlplane/build-requirements.lock` (pip + setuptools).
   After changing dependencies, re-run the command in the lockfile's header inside

@@ -18,7 +18,7 @@ Alle `lmnradius`-Befehle sind ein dünner Client der REST-API (FastAPI, gebunden
 ## Installation (Control-Plane-Tooling)
 
 ```
-apt install ./linuxmuster-radius_<version>_all.deb     # oder aus dem lmn73-apt-Repo
+apt install ./linuxmuster-radius_<version>_amd64.deb     # oder aus dem lmn73-apt-Repo
 systemctl status linuxmuster-radius                    # sollte "active" sein
 ```
 
@@ -296,7 +296,7 @@ Zu sichern:
 Frischer Host → laufende Instanzen:
 
 ```
-apt install ./linuxmuster-radius_<version>_all.deb          # Dienst kommt hoch
+apt install ./linuxmuster-radius_<version>_amd64.deb          # Dienst kommt hoch
 # API-Token behalten: config.yml zurückspielen ODER das neue Token akzeptieren
 cp -a <backup>/secrets/*   /etc/linuxmuster-radius/secrets/      # Betriebs-Secrets
 cp -a <backup>/certs/*     /etc/linuxmuster-radius/certs/        # EAP-CA + Server-Keys

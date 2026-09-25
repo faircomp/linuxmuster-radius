@@ -6,7 +6,7 @@
   "semanticCommits": "enabled",
   "docker-compose": { "enabled": true },
   "pip-compile": {
-    "description": "The hash-pinned lockfiles build-deb.sh installs with --require-hashes. Renovate re-runs the command in each header (uv pip compile ... --generate-hashes) inside controlplane/; scripts/check-lockfiles.sh (CI job `lockfile`) proves the result.",
+    "description": "The hash-pinned lockfiles packaging/build-venv.sh installs with --require-hashes. Renovate re-runs the command in each header (uv pip compile ... --generate-hashes) inside controlplane/; scripts/check-lockfiles.sh (CI job `lockfile`) proves the result.",
     "managerFilePatterns": ["/^controlplane/(build-)?requirements\\.lock$/"],
     "lockFileMaintenance": {
       "description": "The only way the Python lockfiles move: the dependencies in pyproject.toml carry no version (Renovate skips them as unspecified-version) and the transitive ones are indirect (disabled by default). On every run (the workflow runs weekly) Renovate deletes each lockfile and re-runs its header command, i.e. a fresh resolution with fresh hashes, as ONE reviewable PR. The header's --exclude-newer=P7D keeps releases younger than a week out (minimumReleaseAge cannot: lock maintenance has no package timestamps). The schedule lives in the workflow cron only; the default (before 4am on monday) would never match it.",
