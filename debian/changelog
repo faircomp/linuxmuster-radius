@@ -27,12 +27,12 @@ linuxmuster-radius (7.3.4) lmn73; urgency=medium
     exactly the resolved closure of the declared dependencies: an extra
     package slipped into a lockfile, even with a genuine hash, is refused
     before its code can run. The resolver for that check, uv, is pinned by
-    hash and verified first. The checks no longer depend on the environment
-    of whoever runs them (PATH, an activated virtualenv). The build
-    re-checks the finished environment against the lockfiles. Not caught: a
-    pin moved to another genuine release, older or newer, that still
-    satisfies the declared dependencies; only the review of the lockfile
-    change shows it.
+    hash and verified first. The checks no longer take their programs or
+    package sources from the PATH, an activated virtualenv or the Python,
+    pip and uv variables of whoever runs them. The build re-checks the
+    finished environment against the lockfiles. Not caught: a pin moved to
+    another genuine release, older or newer, that still satisfies the
+    declared dependencies; only the review of the lockfile change shows it.
   * The post-installation script turns off git's background maintenance in
     the instance change log (/var/lib/linuxmuster-radius/instances) and no
     longer lets git look into /root/.config when XDG_CONFIG_HOME is
@@ -42,8 +42,8 @@ linuxmuster-radius (7.3.4) lmn73; urgency=medium
   * After publishing, the release job checks that GitHub marks the release
     immutable and fails otherwise, so the files of a release cannot be
     replaced unnoticed. A release also carries the source package (.dsc,
-    source tarball with exactly the files tracked in git, .changes,
-    .buildinfo).
+    source tarball with the files tracked in git except the CI workflows
+    and developer tool settings, .changes, .buildinfo).
 
  -- Kevin Stenzel <mail@kevin-stenzel.de>  Fri, 25 Sep 2026 11:55:45 +0200
 
