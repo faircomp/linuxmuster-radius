@@ -283,12 +283,32 @@ def cmd_closure(args: argparse.Namespace) -> int:
     return report(errors, f"closure ok: all {len(dists)} distributions are required")
 
 
+def cmd_only(args: argparse.Namespace) -> int:
+    """Fail unless LOCK holds exactly one pin, named NAME (the tool lock, e.g. uv)."""
+    errors: list[str] = []
+    pins, errs = parse(args.lock)
+    errors += errs
+    names = [p.name for p in pins]
+    if names != [canonical(args.name)]:
+        errors.append(
+            f"{args.lock}: expected exactly the one pin {args.name}, found {names or 'none'}"
+        )
+    return report(
+        errors,
+        f"only ok: {args.lock} holds exactly {args.name}=={pins[0].version if pins else '?'}",
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("lint")
     p.add_argument("locks", nargs="+")
     p.set_defaults(func=cmd_lint)
+    p = sub.add_parser("only")
+    p.add_argument("name")
+    p.add_argument("lock")
+    p.set_defaults(func=cmd_only)
     p = sub.add_parser("pypi")
     p.add_argument("locks", nargs="+")
     p.set_defaults(func=cmd_pypi)

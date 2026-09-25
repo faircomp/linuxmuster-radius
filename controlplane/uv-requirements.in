@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The resolver the lock gates run (scripts/check-lockfiles.sh, the set-closure check in
+# packaging/build-venv.sh). Pinned == the version in ci.yml. Regenerate the lock from the
+# PyPI file list of this exact version; it is installed hash-pinned and in isolation.
+uv==0.12.18

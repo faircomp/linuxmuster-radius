@@ -274,6 +274,15 @@ Fehler bricht ab, keine Prozess-Substitution mehr, die eine Ausnahme verschluckt
 verlangt, dass jede installierte Distribution von `lmnradius` oder pip gebraucht wird (ein
 zusätzlicher Pin mit echten Hashes fiele sonst durch). `scripts/tests/lock_gates.sh`
 (Fast-Tier) hält die Fälle dauerhaft fest.
+Weiter nachgehärtet (7.3.4, Nachbesserung K1): ein Wheel aus der Build-Sperrdatei kann
+`bin/`-Skripte und eine `.pth` mitbringen; würde es vor der Mengen-/Hüllen-Prüfung installiert,
+liefe die `.pth` beim Bau des eigenen Wheels. Darum läuft **kein** Interpreter aus einem
+Sperrdatei-venv, bevor beide Sperrdateien vollständig geprüft sind — auch die Hülle
+(`check-lockfiles.sh`, uv-Neuauflösung). `uv` selbst kommt hash-gepinnt aus
+`controlplane/uv-requirements.lock` (nur `uv`, isoliertes venv, absoluter Pfad), nie aus einem
+ungepinnten `pip install uv==…`. Ein zusätzlicher Pin mit echten Hashes wird so vor dem venv
+abgewiesen (nachgewiesen: die K1-Fälle in `lock_gates.sh`, `make deb` scheitert, die Marker-
+`.pth` läuft nie).
 `scripts/check-lockfiles.sh` (CI-Job `lockfile`) beweist, dass die Lockfiles zu ihren
 Quellen passen (eine Fassung jünger als sieben Tage fällt dabei durch), jede Prüfsumme eine
 von PyPI für genau diese Fassung ist und jede Fassung ein Wheel für die Zielplattform hat

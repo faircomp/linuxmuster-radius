@@ -66,7 +66,11 @@ SPDX-License-Identifier: GPL-3.0-or-later
   einer Prozess-Substitution ab, ohne den Bau anzuhalten — das fremde Paket lag im `.deb`
   (kalte Prüfung Stufe A, F2). Jetzt lassen Prüfung und Bau nur Zeilen zu, die uv schreibt,
   der Bau prüft jede Prüfsumme gegen PyPI, vergleicht `pip freeze` fehlerfest und verlangt,
-  dass jede Distribution im venv gebraucht wird; `scripts/tests/lock_gates.sh` hält die Fälle
+  dass jede Distribution im venv gebraucht wird. **Nachgehärtet (7.3.4, K1):** kein Interpreter
+  aus einem Sperrdatei-venv läuft, bevor beide Sperrdateien voll geprüft sind — inklusive der
+  Hülle (uv-Neuauflösung), damit ein Wheel mit `.pth`/`bin/`-Skripten aus der Build-Sperrdatei
+  nicht beim Bau des eigenen Wheels ausgeführt wird; `uv` dafür hash-gepinnt und isoliert aus
+  `controlplane/uv-requirements.lock`. `scripts/tests/lock_gates.sh` hält die Fälle
   fest; der CI-Job `lockfile` prüft die Lockfiles gegen
   `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per PR, den ein Mensch
   merged (ADR-016; von Hand, solange Renovate abgeschaltet ist). Das Build-Image (`lmndev-runner`, fremde Org, wöchentlich

@@ -59,9 +59,14 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   linuxmuster-readonlydc (the hub keeps the reference); change it there, not here alone.
 - **Python dependencies** are locked with hashes (ADR-016): `controlplane/requirements.lock`
   (from `pyproject.toml`) and `controlplane/build-requirements.lock` (pip + setuptools).
-  After changing dependencies, re-run the command in the lockfile's header inside
-  `controlplane/` (needs `uv`) and check with `bash scripts/check-lockfiles.sh`. Never
-  hand-edit a lockfile. Renovate is disabled (Kevin, 2026-09-25), so locks, digests, action
+  `controlplane/uv-requirements.lock` pins the resolver `uv` (only `uv`, all PyPI hashes);
+  every place that needs uv installs it hash-pinned from that file, never a bare
+  `pip install uv==…`. After changing dependencies, re-run the command in the lockfile's
+  header inside `controlplane/` (needs `uv`) and check with `bash scripts/check-lockfiles.sh`.
+  Never hand-edit a lockfile. No program from a lockfile-populated venv runs, and no such
+  `bin/` is on `PATH`, before both locks are fully verified (grammar, every hash on PyPI,
+  pin set == closure of the declared inputs); `packaging/build-venv.sh` enforces that before
+  it creates the venv. Renovate is disabled (Kevin, 2026-09-25), so locks, digests, action
   SHAs and CI tool pins are raised by hand in a reviewed PR.
 - **Maintainer string** everywhere: `Kevin Stenzel <mail@kevin-stenzel.de>`.
 

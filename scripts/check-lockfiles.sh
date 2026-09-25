@@ -34,6 +34,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GATE="$ROOT/scripts/lockfile_gate.py"
 LOCKS=("$ROOT/controlplane/requirements.lock" "$ROOT/controlplane/build-requirements.lock")
+# uv is the resolver; take it by absolute path from the env (an isolated, hash-pinned tool
+# venv), never a bare name that a venv bin/ on PATH could shadow (K1). `python3 -I -B` runs
+# the system interpreter, never one from a lock-populated venv.
+UV="${UV:-uv}"
 
 if [ "${1:-}" = --lint ]; then
     shift
@@ -74,7 +78,7 @@ for pair in pyproject.toml:requirements.lock build-requirements.in:build-require
         if [ "$mode" = target ]; then
             extra=(--python-platform=x86_64-manylinux_2_39 --only-binary=:all:)
         fi
-        (cd "$dir" && uv pip compile --quiet "${LOCK_ARGS[@]}" "${extra[@]}" \
+        (cd "$dir" && "$UV" pip compile --quiet "${LOCK_ARGS[@]}" "${extra[@]}" \
             --output-file="$lock" "$src")
         if ! diff -u <(pins "$committed") <(pins "$dir/$lock") > "$TMP/pins.diff"; then
             fail "$lock: pins differ from a fresh $mode resolution"
@@ -84,7 +88,7 @@ for pair in pyproject.toml:requirements.lock build-requirements.in:build-require
 
     mkdir -p "$TMP/fresh"
     pins "$committed" > "$TMP/fresh/$lock.in"
-    (cd "$TMP/fresh" && uv pip compile --quiet --generate-hashes --python-version=3.12 \
+    (cd "$TMP/fresh" && "$UV" pip compile --quiet --generate-hashes --python-version=3.12 \
         --no-deps --output-file="$lock" "$lock.in")
     unknown="$(comm -23 <(hashes "$committed") <(hashes "$TMP/fresh/$lock"))"
     if [ -n "$unknown" ]; then

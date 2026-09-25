@@ -12,19 +12,50 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${1:?usage: build-venv.sh <venv directory>}"
 GATE="$ROOT/scripts/lockfile_gate.py"
-LOCKS=("$ROOT/controlplane/build-requirements.lock" "$ROOT/controlplane/requirements.lock")
+CP="$ROOT/controlplane"
+LOCKS=("$CP/build-requirements.lock" "$CP/requirements.lock")
+UVLOCK="$CP/uv-requirements.lock"
 WHEELS="$(mktemp -d)"
-trap 'rm -rf "$WHEELS"' EXIT
+TOOLS="$(mktemp -d)"
+trap 'rm -rf "$WHEELS" "$TOOLS"' EXIT
 die() { echo "build-venv.sh: $*" >&2; exit 1; }
+# The system interpreter, never one from a venv this script populates from a lockfile.
+PY=python3
 
-# Before pip reads a lockfile. (1) Every line is one uv writes: pip would also honour an
-# indented URL requirement, an --extra-index-url line and every other option line, and a
-# check that reads only some lines lets them through. (2) Every hash is one PyPI publishes
-# for that exact version: pip compares only the hash of the file it downloads, so a
-# replaced hash of any other file (the sdist, another platform's wheel) would pass pip.
-echo "== lockfiles =="
-python3 -I -B "$GATE" lint "${LOCKS[@]}" || die "a lockfile holds a line uv does not write"
-python3 -I -B "$GATE" pypi "${LOCKS[@]}" || die "a lockfile hash is not a file PyPI publishes"
+# K1 (linuxmusterDEV work/tasks/nachbesserung-kalte-pruefung-umbau.md): no program or
+# interpreter from a venv populated by requirements.lock / build-requirements.lock runs, and
+# no such bin/ is on PATH, until BOTH locks are fully verified -- grammar, every hash
+# published by PyPI, and the pin set equal to the closure of the declared inputs. A wheel from
+# the build lock ships bin/ scripts and a .pth; installing it before the set/closure check
+# would run that .pth while lmnradius's own wheel is built (a lock-only build-lock pin ran a
+# .pth 18 times on the pre-K1 head, though the extra pin was caught afterwards). So the venv
+# below is created only after step 3.
+echo "== lockfiles: grammar and published hashes =="
+# 1. Grammar (stdlib only): every line is one uv writes. pip would also honour an indented
+#    URL requirement, an --extra-index-url line and every other option line.
+"$PY" -I -B "$GATE" lint "${LOCKS[@]}" || die "a lockfile holds a line uv does not write"
+# 2. Every hash is one PyPI publishes for that exact version (pip only checks the file it
+#    downloads, so a replaced sdist or other-platform-wheel hash would pass pip).
+"$PY" -I -B "$GATE" pypi "${LOCKS[@]}" || die "a lockfile hash is not a file PyPI publishes"
+
+echo "== resolver: uv from an isolated, hash-pinned tool venv =="
+# uv is the only thing this venv ever holds (asserted), verified like the shipped locks and
+# installed with --require-hashes; the pip that installs it is the stdlib/ensurepip one, and
+# the venv's bin/ is never put on PATH. Called by absolute path in step 3.
+"$PY" -I -B "$GATE" lint "$UVLOCK" || die "the uv lock holds a line uv does not write"
+"$PY" -I -B "$GATE" only uv "$UVLOCK" || die "the uv lock does not hold exactly uv"
+"$PY" -I -B "$GATE" pypi "$UVLOCK" || die "a uv-lock hash is not a file PyPI publishes"
+"$PY" -m venv "$TOOLS/uv"
+"$TOOLS/uv/bin/pip" install --quiet --require-hashes --only-binary :all: --no-deps -r "$UVLOCK" \
+    || die "installing the pinned uv failed"
+UV="$TOOLS/uv/bin/uv"
+
+echo "== lockfiles: pin set equals the closure of the declared inputs =="
+# 3. uv re-resolves pyproject.toml / build-requirements.in and the committed pins must be
+#    exactly that closure -- an extra pin (even with real PyPI hashes and a shipped wheel) is
+#    rejected HERE, before any lock wheel is unpacked. PATH carries no venv bin/.
+UV="$UV" PATH=/usr/sbin:/usr/bin:/sbin:/bin bash "$ROOT/scripts/check-lockfiles.sh" \
+    || die "a lockfile is not the closure of its declared inputs (extra/other pins)"
 
 echo "== venv @ $VENV =="
 rm -rf "$VENV"
