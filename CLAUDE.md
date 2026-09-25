@@ -52,7 +52,15 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   writes `../linuxmuster-radius_<version>_amd64.deb` plus `.changes`, `.buildinfo`, `.dsc` and
   the source tarball **next to** the checkout. Build it in
   `ghcr.io/linuxmuster/lmndev-runner:24.04` like CI does, pinned by digest — the command is in
-  the `Makefile`; never reference the image by tag alone. `debian/rules` keeps debhelper's
+  the `Makefile` (it mounts the repository's common git directory too, so it works in a git
+  worktree); never reference the image by tag alone. `packaging/make-deb.sh` builds an export
+  of the **git-tracked files as they are in the working tree**: uncommitted edits and staged
+  new files ARE built, untracked files are NOT (`git add` a new module first), and every
+  difference from HEAD is printed as a WARNING before and after the build — the .deb still
+  carries the changelog's version, so never hand such a build around as the release. A `.git`
+  that git cannot use (a worktree without its repository, a checkout owned by someone else)
+  stops the build; nothing configured in `.git` runs (no fsmonitor, hooks or filters).
+  `debian/rules` keeps debhelper's
   file-changing tools (strip, dwz, fixperms, ...) out of the venv, and
   `debian/venv-relocate --verify` fails the build if any pip-installed file changed.
   `debian/venv-relocate` is shared byte-for-byte with linuxmuster-squid and

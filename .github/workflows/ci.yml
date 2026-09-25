@@ -159,6 +159,10 @@ jobs:
       - name: Build package (make deb = dpkg-buildpackage; build deps via build-dep)
         run: |
           apt-get update -qq && apt-get build-dep -y -qq .
+          # make-deb.sh keeps git's ownership guard on. The runner created the workspace
+          # directory, the container builds as root: trust exactly this checkout (its
+          # .git/config was written by actions/checkout, not by the pull request), never '*'.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           make deb
           # dpkg-buildpackage writes one level above the source tree. The .dsc and the
           # source tarball go along because the .changes lists them with their checksums.
