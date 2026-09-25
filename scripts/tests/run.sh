@@ -76,7 +76,8 @@ lint(){
   fi
   if have shellcheck; then
     local sh=()
-    mapfile -t sh < <(git ls-files '*.sh' 2>/dev/null)
+    mapfile -t sh < <(git --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null \
+      ls-files '*.sh' 2>/dev/null)
     if [ "${#sh[@]}" -gt 0 ]; then
       # Warning level only: the info tier is noise here (SC2317 unreachable in
       # trap-cleanup helpers, SC2016 intentional envsubst SHELL-FORMAT quotes).

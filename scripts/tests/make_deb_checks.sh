@@ -24,9 +24,9 @@
 #       with umask 002 and one file is 0600;
 #   R3  run nothing the checkout's .git configures: core.fsmonitor, a clean/smudge filter for
 #       every path (.git/info/attributes), hooks, git config from the environment;
-#   R1  run nothing from the caller's environment: an activated venv with the K1 wheel
-#       (scripts/tests/k1_wheel.py: bin/ tools and a .pth, all writing the marker) first on
-#       PATH, VIRTUAL_ENV, PYTHONPATH with a marker sitecustomize, PYTHONHOME, UV_*/PIP_*
+#   R1  run nothing from these parts of the caller's environment: an activated venv with the
+#       K1 wheel (scripts/tests/k1_wheel.py: bin/ tools and a .pth, all writing the marker)
+#       first on PATH, VIRTUAL_ENV, PYTHONPATH with a marker sitecustomize, PYTHONHOME, UV_*/PIP_*
 #       redirections, and a poisoned .venv in the checkout.
 # Any marker line fails the test. Needs git, dpkg-dev, debhelper, python3-venv and PyPI.
 set -uo pipefail
@@ -61,6 +61,9 @@ no_marker() {
     fi
     rm -f "$MARK"
 }
+# git with the same switches as make-deb.sh: no pager, no fsmonitor, no hooks (nothing a
+# checkout's .git configures runs through the harness either).
+GIT=(git --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null)
 marker_script() {  # <path> <label>: an executable that appends "<label> ran" to the marker
     printf '#!/bin/sh\necho "%s ran: $*" >> %s\ncat\n' "$2" "$MARK" > "$1"
     chmod 0755 "$1"
@@ -72,9 +75,9 @@ checkout() {
     mkdir -p "$1"
     # (the harness reads its own, trusted checkout; as root in `guard` mode that belongs to the
     # build user, hence the exact safe.directory -- make-deb.sh itself never waives the guard)
-    git -c safe.directory="$ROOT" -C "$ROOT" ls-files -z \
+    "${GIT[@]}" -c safe.directory="$ROOT" -C "$ROOT" ls-files -z \
         | tar -C "$ROOT" --null -T - -cf - | tar -C "$1" -xf -
-    G=(git -C "$1" -c user.name=test -c user.email=test@localhost -c commit.gpgsign=false)
+    G=("${GIT[@]}" -C "$1" -c user.name=test -c user.email=test@localhost -c commit.gpgsign=false)
     "${G[@]}" init -q
     "${G[@]}" add -A
     "${G[@]}" commit -q -m base
@@ -83,10 +86,10 @@ checkout() {
 plant_git() {
     marker_script "$TMP/fsmonitor" "core.fsmonitor"
     marker_script "$TMP/filter" "filter"
-    git -C "$1" config core.fsmonitor "$TMP/fsmonitor"
-    git -C "$1" config filter.evil.clean "$TMP/filter clean %f"
-    git -C "$1" config filter.evil.smudge "$TMP/filter smudge %f"
-    git -C "$1" config filter.evil.required true
+    "${GIT[@]}" -C "$1" config core.fsmonitor "$TMP/fsmonitor"
+    "${GIT[@]}" -C "$1" config filter.evil.clean "$TMP/filter clean %f"
+    "${GIT[@]}" -C "$1" config filter.evil.smudge "$TMP/filter smudge %f"
+    "${GIT[@]}" -C "$1" config filter.evil.required true
     mkdir -p "$1/.git/info" "$1/.git/hooks"
     echo '* filter=evil' > "$1/.git/info/attributes"
     for h in post-index-change pre-commit post-checkout post-commit reference-transaction; do
