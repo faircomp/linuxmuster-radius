@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The hermetic venv under /opt is the design: FastAPI, pydantic v2, typer and docker-py are
+# not packaged for Ubuntu 24.04 in usable versions. Its files are exactly what pip installed
+# from the hash-pinned lockfiles; debian/venv-relocate --verify checks them against RECORD
+# before dh_builddeb.
+dir-or-file-in-opt [opt/*]
+# pip compiles the bytecode; venv-relocate recompiles it as checked-hash .pyc for /opt.
+package-installs-python-pycache-dir [opt/linuxmuster-radius/venv/*]
+# Console scripts run the venv's own interpreter, not /usr/bin/python3.
+wrong-path-for-interpreter * [opt/linuxmuster-radius/venv/*]
+# Stripping would change files pip recorded in RECORD (dh_strip is overridden).
+unstripped-binary-or-object [opt/linuxmuster-radius/venv/*]
+# PyYAML's manylinux wheel links libyaml statically.
+embedded-library libyaml [opt/linuxmuster-radius/venv/*]

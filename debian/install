@@ -1,0 +1,4 @@
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The unit stays in /lib/systemd/system for the 7.3 line; the maintainer scripts handle it.
+packaging/systemd/linuxmuster-radius.service lib/systemd/system/

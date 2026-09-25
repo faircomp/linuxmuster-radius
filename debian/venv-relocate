@@ -1,0 +1,168 @@
+#!/usr/bin/python3
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Make a venv built inside the package tree correct for its installed path, or prove it.
+
+    debian/venv-relocate          <pkgroot> <dest>   (override_dh_auto_install)
+    debian/venv-relocate --verify <pkgroot> <dest>   (execute_before_dh_builddeb)
+
+<pkgroot> is debian/<package>, <dest> the installed venv path, e.g. /opt/linuxmuster-squid/venv.
+The venv is built at <pkgroot><dest> without root. pip writes that build path into the
+console-script shebangs, bin/activate*, pyvenv.cfg and the co_filename of every .pyc.
+Relocating rewrites the text files, recompiles the .pyc files (checked-hash, reproducible,
+independent of mtimes) and re-hashes the RECORD rows of the files it rewrote.
+--verify fails the build if any file in the package still carries the build path, if any
+RECORD row does not match its file (so no debhelper tool changed a pip-installed file), if
+any .pyc would be stale on the target, or if `pip check` fails.
+"""
+
+import base64
+import csv
+import glob
+import hashlib
+import importlib.util
+import io
+import marshal
+import os
+import py_compile
+import re
+import subprocess
+import sys
+
+# distlib writes this /bin/sh trampoline instead of a plain shebang when the interpreter path
+# is longer than 127 bytes (deep build directories). Normalised to the plain form.
+TRAMPOLINE = re.compile(rb"\A#!/bin/sh\n'''exec' (?:\"([^\"]+)\"|(\S+)) \"\$0\" \"\$@\"\n' '''\n")
+
+
+def walk(top):
+    for d, _dirs, names in os.walk(top):
+        for n in names:
+            p = os.path.join(d, n)
+            if not os.path.islink(p):
+                yield p
+
+
+def read(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def record_hash(data):
+    return "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+
+
+def records(venv):
+    return sorted(glob.glob(venv + "/lib/python3*/site-packages/*.dist-info/RECORD"))
+
+
+def read_record(path):
+    raw = read(path)
+    nl = "\r\n" if b"\r\n" in raw else "\n"
+    return list(csv.reader(io.StringIO(raw.decode(), newline=""))), nl
+
+
+def relocate(root, dest):
+    venv = root + dest
+    old, new = venv.encode(), dest.encode()
+    changed, pycs = set(), []
+    for p in walk(venv):
+        if p.endswith(".pyc"):
+            pycs.append(p)
+            continue
+        data = read(p)
+        if old not in data:
+            continue
+        m = TRAMPOLINE.match(data)
+        if m:
+            data = b"#!" + (m.group(1) or m.group(2)) + b"\n" + data[m.end() :]
+        with open(p, "r+b") as f:  # same inode, same mode
+            f.write(data.replace(old, new))
+            f.truncate()
+        changed.add(os.path.realpath(p))
+    for pyc in pycs:
+        src = importlib.util.source_from_cache(pyc)
+        py_compile.compile(
+            src,
+            cfile=pyc,
+            dfile=dest + src[len(venv) :],
+            doraise=True,
+            invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH,
+        )
+    fixed = 0
+    for rec in records(venv):
+        rows, nl = read_record(rec)
+        base = os.path.dirname(os.path.dirname(rec))
+        for row in rows:
+            p = os.path.realpath(os.path.join(base, row[0]))
+            if row[1] and p in changed:
+                data = read(p)
+                row[1], row[2] = record_hash(data), str(len(data))
+                fixed += 1
+        out = io.StringIO(newline="")
+        csv.writer(out, lineterminator=nl).writerows(rows)
+        with open(rec, "w", newline="") as f:
+            f.write(out.getvalue())
+    print(
+        f"venv-relocate: {len(changed)} files rewritten, {len(pycs)} .pyc recompiled, "
+        f"{fixed} RECORD rows re-hashed"
+    )
+
+
+def verify(root, dest):
+    venv = root + dest
+    errors = []
+    marker = (root + dest).encode()
+    for p in walk(root):
+        if marker in read(p):
+            errors.append(f"build path left in {p}")
+    for d, dirs, names in os.walk(root):
+        for n in dirs + names:
+            p = os.path.join(d, n)
+            if os.path.islink(p) and os.readlink(p).startswith(root):
+                errors.append(f"symlink into the build tree: {p}")
+    rows_ok = 0
+    for rec in records(venv):
+        rows, _ = read_record(rec)
+        base = os.path.dirname(os.path.dirname(rec))
+        for row in rows:
+            p = os.path.join(base, row[0])
+            if not os.path.lexists(p):
+                errors.append(f"{rec}: {row[0]} missing")
+            elif row[1]:
+                data = read(p)
+                if row[1] != record_hash(data) or row[2] != str(len(data)):
+                    errors.append(f"{rec}: {row[0]} differs from its RECORD row")
+                else:
+                    rows_ok += 1
+    pyc_ok = 0
+    for pyc in (p for p in walk(venv) if p.endswith(".pyc")):
+        data = read(pyc)
+        src = importlib.util.source_from_cache(pyc)
+        want = importlib.util.source_hash(read(src))
+        if int.from_bytes(data[4:8], "little") != 3 or data[8:16] != want:
+            errors.append(f"stale or unchecked .pyc: {pyc}")
+        elif not marshal.loads(data[16:]).co_filename.startswith(dest + "/"):
+            errors.append(f"co_filename outside {dest}: {pyc}")
+        else:
+            pyc_ok += 1
+    env = dict(
+        os.environ, PYTHONDONTWRITEBYTECODE="1", PIP_NO_INPUT="1", PIP_DISABLE_PIP_VERSION_CHECK="1"
+    )
+    r = subprocess.run([venv + "/bin/python", "-B", "-m", "pip", "check"], env=env)
+    if r.returncode:
+        errors.append("pip check failed")
+    for e in errors[:50]:
+        print("venv-relocate --verify:", e, file=sys.stderr)
+    if errors:
+        sys.exit(f"venv-relocate --verify: {len(errors)} problem(s)")
+    print(
+        f"venv-relocate --verify: no build path, {rows_ok} RECORD hashes match, "
+        f"{pyc_ok} .pyc valid, pip check ok"
+    )
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] == ["--verify"]:
+        verify(*sys.argv[2:4])
+    else:
+        relocate(*sys.argv[1:3])
