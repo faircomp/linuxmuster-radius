@@ -68,8 +68,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
   der Bau prüft jede Prüfsumme gegen PyPI, vergleicht `pip freeze` fehlerfest und verlangt,
   dass jede Distribution im venv gebraucht wird; `scripts/tests/lock_gates.sh` hält die Fälle
   fest; der CI-Job `lockfile` prüft die Lockfiles gegen
-  `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per Renovate-PR, den
-  ein Mensch merged (ADR-016). Das Build-Image (`lmndev-runner`, fremde Org, wöchentlich
+  `pyproject.toml`, PyPI und die Zielplattform; neue Fassungen nur per PR, den ein Mensch
+  merged (ADR-016; von Hand, solange Renovate abgeschaltet ist). Das Build-Image (`lmndev-runner`, fremde Org, wöchentlich
   neu gebaut, Build als root) steht per Digest, jede Action per Commit-SHA; das Release
   entsteht als Entwurf und wird erst nach dem sha256-Abgleich der Assets veröffentlicht
   (ADR-017).

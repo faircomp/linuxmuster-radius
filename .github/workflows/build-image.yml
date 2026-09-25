@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: Kevin Stenzel
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Build the data-plane FreeRADIUS image and push it to GHCR by tag + immutable digest.
-# Renovate then pins that digest in the deployment; a human merges the bump.
-# Every action is pinned by full commit SHA (`# vN` names the tag); Renovate bumps both.
+# Pin that digest as DEFAULT_IMAGE (controlplane/lmnradius/models.py) in a reviewed PR; while
+# Renovate is disabled (Kevin, 2026-09-25) that is done by hand.
+# Every action is pinned by full commit SHA (`# vN` names the tag); raised by hand as well.
 name: build-image
 
 on:
@@ -49,4 +50,4 @@ jobs:
         run: |
           echo "Published ghcr.io/${{ github.repository_owner }}/linuxmuster-radius"
           echo "Digest: ${{ steps.build.outputs.digest }}"
-          echo "Pin this digest via Renovate (docker:pinDigests)."
+          echo "Pin this digest as DEFAULT_IMAGE in controlplane/lmnradius/models.py (by hand while Renovate is disabled)."

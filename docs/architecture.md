@@ -112,8 +112,8 @@ die Entscheidungen mit Begründung und verworfenen Alternativen: `docs/decisions
   `crash_looping`, nicht „running"). `rm` verlässt die Domäne (Image-Aktion `leave`)
   und entfernt Container, Volume, Config und Datensatz.
 - **Updater:** Pull-by-**Digest** (`image@sha256:`), **health-gated**, **Auto-Rollback**
-  auf den letzten Known-Good; Renovate (`docker:pinDigests`, `automerge:false`) +
-  CI-Publish. Kein Watchtower.
+  auf den letzten Known-Good; neue Digests per geprüftem PR (Renovate ist seit 2026-09-25
+  abgeschaltet, bis dahin von Hand) + CI-Publish. Kein Watchtower.
 - **EAP-CA / Cert-Manager:** dedizierte, single-purpose EAP-CA
   (`lmnradius ca init` / `cert issue` / `ca export`) — siehe §7.
 - **CLI (`lmnradius`, Typer/httpx):** ausschließlich über die REST-API — **ein**

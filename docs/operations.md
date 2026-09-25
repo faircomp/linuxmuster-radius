@@ -165,7 +165,7 @@ lmnradius rollback   default-school              # auf das letzte bekannt-gute I
 Das Update zieht den neuen Digest, ersetzt den Container, wartet auf `healthy` (winbind-
 Trust **und** radiusd erreichbar) und **rollt bei Fehler automatisch zurück** — die Schule
 bleibt online. Welcher Digest in Produktion gehört, entscheidet ein **gemergter
-Renovate-PR** (nie Auto-Merge). Bei einem **`.deb`-Upgrade** ruft die `postinst`
+Digest-Bump-PR** (nie Auto-Merge; von Hand, solange Renovate abgeschaltet ist). Bei einem **`.deb`-Upgrade** ruft die `postinst`
 automatisch `update-all` auf (best-effort; Instanzen auf dem Default werden übersprungen,
 die apt-Transaktion scheitert daran nie).
 

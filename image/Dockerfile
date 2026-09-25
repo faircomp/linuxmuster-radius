@@ -20,7 +20,8 @@
 # under /etc/freeradius/3.0/ (owned by the freeradius-config dependency); loadable
 # modules are /usr/lib/freeradius/rlm_*.so.
 # The base by digest: the tag is rebuilt upstream, the digest names exactly one image.
-# Renovate proposes new 24.04 digests as PRs (never 26.04: a new linuxmuster line).
+# New 24.04 digests are raised by hand while Renovate is disabled (never 26.04: a new
+# linuxmuster line).
 FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
 
 ENV DEBIAN_FRONTEND=noninteractive

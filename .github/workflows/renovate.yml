@@ -2,6 +2,10 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# DISABLED (Kevin, 2026-09-25): this workflow is turned off in the repository settings until
+# Renovate is re-enabled with a GitHub App; until then no Renovate PRs are opened and pins and
+# locks are raised by hand. The rest of this header describes the workflow once re-enabled.
+#
 # Self-hosted Renovate — so digest bumps work without depending on the org-level
 # Renovate/Mend GitHub App. Runs weekly and on demand. It opens PRs that bump the
 # @sha256 pins (the data-plane image DEFAULT_IMAGE, every Dockerfile / docker-compose

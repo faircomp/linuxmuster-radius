@@ -39,7 +39,7 @@ or config-injection sink), so the examples double as the validation contract.
 | `ldap_bind_secret` | **Filename** of the LDAP bind password secret. |
 | `radius_secret` | **Filename** of the per-subnet RADIUS shared secret. |
 | `ldap_ca` | **Filename** (under `certs_dir/<name>/`) of the PEM bundle the DC's LDAPS certificate is verified against (`ldap-ca.pem`, written by the API from `--ldap-ca`/`--ldap-ca-tofu`). Mandatory for `ldaps://` on create; `null` marks a pre-7.3.1 record whose LDAPS link is unverified. |
-| `image` | Data-plane image; carries an explicit `:tag` or `@sha256:<digest>` — **digest-pinned** in production (Renovate, P5). A bare repo is rejected. |
+| `image` | Data-plane image; carries an explicit `:tag` or `@sha256:<digest>` — **digest-pinned** in production (P5). A bare repo is rejected. |
 
 The three `*_secret` fields are **secret file names**, never the secret values —
 the values live in `/etc/linuxmuster-radius/secrets/` (0700) and are mounted into

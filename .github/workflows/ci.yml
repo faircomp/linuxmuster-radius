@@ -13,10 +13,13 @@
 #  * Python dependencies from hash-pinned lockfiles (controlplane/*.lock, job `lockfile`).
 #  * Build image by digest. ghcr.io/linuxmuster/lmndev-runner:<tag> is a mutable tag of
 #    another org, rebuilt every week, and the build runs as root in it; `:<tag>@sha256:<digest>`
-#    pulls exactly that image (the digest wins, the tag only tells Renovate which tag's digest
-#    to follow). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
+#    pulls exactly that image (the digest wins, the tag only names the line whose digest is
+#    pinned). ci.yml, release.yml and the Makefile carry the SAME digests, or CI proves a
 #    different build than the one that is released.
 #  * Every action by full commit SHA with a `# vN` comment: a tag can be moved, a SHA cannot.
+# Pins and locks are raised by hand: the Renovate workflow is disabled (Kevin, 2026-09-25)
+# until Renovate is re-enabled with a GitHub App (renovate.json and renovate.yml stay for that
+# day). Raise a digest in ci.yml, release.yml and the Makefile in the same commit.
 name: ci
 
 on:
@@ -48,11 +51,11 @@ jobs:
       # The gate tools are PINNED on purpose: an unpinned `pip install ruff` picks up
       # whatever released last, and a linter that widens its default rule set turns the
       # pipeline red without a single line of our code changing (exactly what happened
-      # on 2026-08-04). Pinned == the developer's local result == CI's result. Renovate
-      # proposes bumps as PRs, so upgrading stays a deliberate, reviewed step.
+      # on 2026-08-04). Pinned == the developer's local result == CI's result. The pins are
+      # raised by hand in a reviewed PR, so upgrading stays a deliberate step.
       # The runtime dependencies come from the hash-pinned lockfile the .deb is built from,
       # installed AFTER the tools so no tool can move them: pytest and mypy see exactly
-      # the versions that ship (and the ones a Renovate lockfile bump proposes), not
+      # the versions that ship (and the ones a lockfile bump proposes), not
       # whatever PyPI serves today. pip check: the tools still fit the locked versions.
       - name: Install control-plane (locked dependencies) + tools
         run: |
@@ -115,7 +118,8 @@ jobs:
       - id: image
         run: |
           DIST=$(dpkg-parsechangelog -S Distribution); NUM="${DIST#lmn}"
-          # By digest, never by tag alone (see the header); Renovate proposes the bumps.
+          # By digest, never by tag alone (see the header); raise both lines here and in
+          # release.yml together.
           if [ "${NUM:-0}" -ge 74 ] 2>/dev/null; then
             IMG=ghcr.io/linuxmuster/lmndev-runner:latest@sha256:d735e6ccc6fd9df71b2552b06ac6f5cb4bf2d03f40e14bafe47213325b7b801b
           else

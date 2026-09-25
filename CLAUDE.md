@@ -61,7 +61,8 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   (from `pyproject.toml`) and `controlplane/build-requirements.lock` (pip + setuptools).
   After changing dependencies, re-run the command in the lockfile's header inside
   `controlplane/` (needs `uv`) and check with `bash scripts/check-lockfiles.sh`. Never
-  hand-edit a lockfile; Renovate bumps them by PR.
+  hand-edit a lockfile. Renovate is disabled (Kevin, 2026-09-25), so locks, digests, action
+  SHAs and CI tool pins are raised by hand in a reviewed PR.
 - **Maintainer string** everywhere: `Kevin Stenzel <mail@kevin-stenzel.de>`.
 
 **Security pitfalls (from the threat model — do not violate):**

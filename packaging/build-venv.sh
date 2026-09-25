@@ -31,8 +31,8 @@ rm -rf "$VENV"
 mkdir -p "$(dirname "$VENV")"
 python3 -m venv "$VENV"
 # Supply chain: every distribution in the venv comes from a lockfile that pins its
-# version AND sha256 (controlplane/*.lock, `uv pip compile --generate-hashes`, bumped by
-# Renovate PRs, checked by scripts/check-lockfiles.sh). --require-hashes: pip installs a
+# version AND sha256 (controlplane/*.lock, `uv pip compile --generate-hashes`, raised in
+# reviewed PRs, checked by scripts/check-lockfiles.sh). --require-hashes: pip installs a
 # file only if its hash is in the lock. --only-binary :all:: wheels only, so no sdist is
 # built with unhashed build dependencies. --no-deps: the lock is the whole closure, pip
 # resolves nothing on its own (pip check below proves it is complete).

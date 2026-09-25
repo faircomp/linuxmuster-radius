@@ -13,7 +13,7 @@
 #      7.3.3. Nothing else is checked (and no uv runs on the file) until this passes.
 #      `check-lockfiles.sh --lint [LOCK...]` runs only this step, without uv or network;
 #      build-venv.sh runs it before pip reads a lockfile.
-#   1. The header records the canonical command (the one Renovate re-runs on a bump).
+#   1. The header records the canonical command (the one that regenerates the lockfile).
 #      --exclude-newer=P7D: only releases that have been on PyPI for at least a week, the
 #      window in which a compromised upload is usually noticed and yanked.
 #   2. Re-resolving with that command, preferring the locked versions, yields the same pins
