@@ -30,7 +30,7 @@ config). The `CRABBOX_PROXMOX_TOKEN_SECRET` lives **only** in the gitignored
    from `deploy/e2e/dc` and `deploy/e2e/client` by compose, not pulled):
    `crabbox run --id <slug> -- 'bash scripts/tests/crabbox_bootstrap.sh'`
 3. **Run** the aggregator — one command, dependency-gated:
-   - `crabbox run --id <slug> -- 'bash scripts/tests/run.sh quick'`                        (ruff + mypy + pytest + shellcheck + reuse)
+   - `crabbox run --id <slug> -- 'bash scripts/tests/run.sh quick'`                        (lock gate first, then ruff + mypy + pytest + shellcheck + reuse + lock regression test)
    - `crabbox run --id <slug> -- 'LMNRADIUS_ALLOW_REAL=1 bash scripts/tests/run.sh e2e'`   (docker-compose winbind/EAP E2E)
    - `crabbox run --id <slug> -- 'LMNRADIUS_ALLOW_REAL=1 bash scripts/tests/run.sh all'`   (quick + e2e)
 4. **Inspect** on failure: `crabbox ssh --id <slug>` (live), or read the newest

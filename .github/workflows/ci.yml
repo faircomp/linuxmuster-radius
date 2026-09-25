@@ -184,11 +184,16 @@ jobs:
           if-no-files-found: error
 
   # The lock gates through a real `make deb` in the pinned image, as the build user. Proves K1
-  # end to end: a wheel pinned in the build lock (or both locks) whose distribution ships bin/
-  # scripts and a marker-writing .pth -- with a real name and hash, its "publication" simulated
-  # only in the throwaway copy -- is rejected by the set-closure check BEFORE the venv is
-  # populated, so `make deb` fails, ships no .deb, and the .pth never runs (the marker stays
-  # absent). The fast tier runs the same script without --build.
+  # end to end: a wheel pinned in the build lock, the runtime lock, both, or the uv lock, whose
+  # distribution ships executable bin/ scripts and a marker-writing .pth -- with a real name
+  # and hash, its "publication" simulated only in the throwaway copy -- is rejected BEFORE
+  # anything from a lock is installed, so `make deb` fails, ships no .deb, and none of its code
+  # runs (the marker stays absent), also under a poisoned caller environment (R1). The fast tier
+  # runs the same script without LOCK_GATES_DEB. Then scripts/tests/make_deb_checks.sh: a
+  # complete `make deb` of a dirty git checkout under the same poisoned environment (R1, R3,
+  # R4): it builds, warns about every uncommitted difference, packs exactly the tracked files
+  # with fixed modes and symlinks, runs nothing configured in .git, and refuses a worktree
+  # whose repository git cannot reach.
   lock-gates-build:
     needs: resolve
     runs-on: ubuntu-latest
@@ -200,14 +205,17 @@ jobs:
       - name: Every manipulated lock stops make deb, and no lock wheel runs first
         run: |
           apt-get update -qq && apt-get build-dep -y -qq .
-          # The image ships no pip; build-dep installs python3-venv. uv (the resolver
-          # lock_gates.sh runs directly) comes hash-pinned from the uv-only lock, into an
-          # isolated venv put on PATH (K1). make deb inside the test installs its own uv again.
-          python3 -m venv /uv
-          /uv/bin/pip install --require-hashes --only-binary :all: --no-deps -r controlplane/uv-requirements.lock
+          # build-dep installs python3-venv; the gate installs its own uv, nothing else is
+          # installed here (R2).
           chown -R build:build .
-          runuser -u build -- env HOME=/home/build PATH="/uv/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+          runuser -u build -- env HOME=/home/build \
             LOCK_GATES_DEB=1 LOCK_GATES_VERBOSE=1 bash scripts/tests/lock_gates.sh
+      - name: make deb of a dirty checkout under a poisoned environment (R1, R3, R4)
+        run: |
+          # As root in a checkout that belongs to `build`: git's ownership guard refuses it and
+          # nothing its .git configures runs as root (R3). Then the dirty build as `build`.
+          bash scripts/tests/make_deb_checks.sh guard build
+          runuser -u build -- env HOME=/home/build bash scripts/tests/make_deb_checks.sh
 
   # The one failure mode of a packaging change that no other job would notice: a module of
   # the control plane, the unit or the CLI link quietly falls out of the package, or a mode
