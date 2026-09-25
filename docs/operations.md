@@ -29,7 +29,8 @@ den Dienst — gebunden an **`127.0.0.1:8080`**. Verzeichnisse: `secrets_dir`
 `0700`), `instances_dir` (`/var/lib/linuxmuster-radius/instances`, als Git-Repo = Change-Log:
 jedes `create`/`set-ldap-ca`/`rm` ist ein Commit, `sudo -u lmnradius git -C
 /var/lib/linuxmuster-radius/instances log` zeigt die Historie; die `postinst` legt Repo
-und Identität als `lmnradius` an und holt beim Upgrade liegengebliebene Datensätze nach).
+und Identität als `lmnradius` an, schaltet git-Hintergrundwartung im Repo ab
+(`maintenance.auto false`, `gc.auto 0`) und holt beim Upgrade liegengebliebene Datensätze nach).
 
 ## Erstinbetriebnahme (einmalig)
 

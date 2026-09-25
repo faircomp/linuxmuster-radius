@@ -49,14 +49,25 @@ chmod 700 /etc/linuxmuster-radius/secrets /etc/linuxmuster-radius/certs
 # directory"), the identity was never set and every commit died with "empty ident
 # name" -- the change log stayed empty (found on real installs, 2026-09-22).
 # Idempotent: repairs an existing 7.3.0 repo (identity, pending records) on upgrade.
+# Background maintenance is off in the repository config, set before its first commit: git
+# 2.47 and later start auto-maintenance after a commit as a DETACHED process that creates
+# and removes files under .git (objects/maintenance.lock) while the `chown -R` above walks
+# the tree on the next configure; linuxmuster-squid 7.3.1-7.3.3 failed its configure on
+# exactly that race. The service's own commits read the same repository config, so they
+# spawn none either. A change log of a few commits needs no gc.
 INST_DIR=/var/lib/linuxmuster-radius/instances
 if command -v git >/dev/null 2>&1; then
-    as_lmnradius() { runuser -u lmnradius -- "$@"; }
+    # runuser resets HOME, not XDG_CONFIG_HOME: an admin environment pointing it into /root
+    # (GitHub runners, `sudo -E`) would make every git call warn "unable to access
+    # '/root/.config/git/...': Permission denied".
+    as_lmnradius() { runuser -u lmnradius -- env -u XDG_CONFIG_HOME "$@"; }
     if [ ! -d "$INST_DIR/.git" ]; then
         as_lmnradius git -C "$INST_DIR" -c init.defaultBranch=main init -q
     fi
     as_lmnradius git -C "$INST_DIR" config user.name  "linuxmuster-radius"
     as_lmnradius git -C "$INST_DIR" config user.email "lmnradius@localhost"
+    as_lmnradius git -C "$INST_DIR" config maintenance.auto false
+    as_lmnradius git -C "$INST_DIR" config gc.auto 0
     # Records written while the change log was broken (staged but never committed, or
     # never added) become one import commit, so `git log` is complete after the upgrade.
     for f in "$INST_DIR"/*.yaml; do
