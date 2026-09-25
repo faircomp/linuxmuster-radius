@@ -36,7 +36,8 @@
 # refusal's reason. LOCK_GATES_DEB=1 also runs the whole `make deb` (dpkg-buildpackage) on each
 # tampered tree and requires it to fail without a .deb and without a marker; run that inside
 # the build image, as a user who may write the checkout, after `apt-get build-dep .` (the
-# command is in the Makefile). The harness itself runs in a clean environment too.
+# command is in the Makefile). The harness drops the same PATH/PYTHON*/UV_*/PIP_*/GIT_* parts of
+# its environment as the gates.
 set -uo pipefail
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
