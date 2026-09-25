@@ -8,19 +8,18 @@
 # e2e/all refuse without LMNRADIUS_ALLOW_REAL=1 (protection against accidental runs).
 #
 # The lock gate (scripts/check-lockfiles.sh) runs FIRST in every mode but e2e, before anything
-# that could run a package from a lockfile (mypy plugins, pytest, a venv's tools), and in a
-# clean environment: /bin/bash, the gate fixes its own PATH and ignores VIRTUAL_ENV, PYTHON*,
-# UV_* and PIP_*, so neither an activated venv nor the checkout's .venv takes part in it
-# (K1/R1). If it fails, lint and unit are not run. Only after it passed are the control-plane
-# tools of .venv (created by crabbox_bootstrap) put first on PATH for lint and unit; the lock
-# regression test (`locks`) cleans its environment the same way.
+# that could run a package from a lockfile (mypy plugins, pytest, a venv's tools, the lock
+# regression test), started as /bin/bash; the gate fixes its own PATH and drops VIRTUAL_ENV,
+# PYTHON*, UV_* and PIP_*, so neither an activated venv nor the checkout's .venv takes part in
+# it (K1/R1). If it fails, run.sh stops right there: nothing else runs. Only after it passed
+# are the control-plane tools of .venv (created by crabbox_bootstrap) put first on PATH for
+# lint and unit; the lock regression test (`locks`) cleans its environment like the gate.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
 
 PASS=0; FAIL=0; SKIP=0
-GATE=unknown
 pass(){ PASS=$((PASS + 1)); printf '  [PASS] %s\n' "$1"; }
 fail(){ FAIL=$((FAIL + 1)); printf '  [FAIL] %s\n' "$1"; }
 skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %s (%s)\n' "$1" "$2"; }
@@ -33,22 +32,25 @@ run_step(){
   if "$@"; then pass "$name"; else fail "$name"; fi
 }
 
+summary(){
+  echo
+  echo "$PASS passed, $FAIL failed, $SKIP skipped"
+  [ "$FAIL" -eq 0 ]
+}
+
 gate(){
   echo "== lock gate =="
   if /bin/bash scripts/check-lockfiles.sh; then
-    pass "lock gate"; GATE=ok
+    pass "lock gate"
     # Prefer control-plane tools from the venv (created by crabbox_bootstrap), only now.
     if [ -x "$ROOT/.venv/bin/ruff" ]; then export PATH="$ROOT/.venv/bin:$PATH"; fi
   else
-    fail "lock gate"; GATE=failed
+    fail "lock gate"
+    echo "lock gate failed: run.sh stops here, nothing else runs (lint, unit, the lock" \
+      "regression test and e2e could all run code from a lockfile)"
+    summary
+    exit 1
   fi
-}
-
-# gated <name>: lint and unit run only after the lock gate passed.
-gated(){
-  [ "$GATE" = ok ] && return 0
-  skip "$1" "lock gate $GATE: nothing that could run a lockfile package runs"
-  return 1
 }
 
 locks(){
@@ -59,7 +61,6 @@ locks(){
 }
 
 lint(){
-  gated lint || return 0
   echo "== lint =="
   if have ruff; then
     run_step "ruff check"        ruff ruff check .
@@ -91,7 +92,6 @@ lint(){
 }
 
 unit(){
-  gated unit || return 0
   echo "== unit =="
   if [ -f controlplane/pyproject.toml ]; then
     run_step "pytest" pytest pytest -q controlplane/tests
@@ -130,6 +130,4 @@ case "$mode" in
   *) echo "usage: run.sh [gate|lint|unit|quick|locks|e2e|all]" >&2; exit 2 ;;
 esac
 
-echo
-echo "$PASS passed, $FAIL failed, $SKIP skipped"
-[ "$FAIL" -eq 0 ]
+summary

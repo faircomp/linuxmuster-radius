@@ -21,12 +21,16 @@
 #       lock is refused before any of its code runs (no marker);
 #   R6  that wheel is sharp: installed without a gate, its bin/ scripts are executable and
 #       write the marker, and so does its .pth;
-#   R1  the gates ignore the caller's environment: an activated venv (bin/ first on PATH,
-#       VIRTUAL_ENV), a .venv in the checkout, PYTHONPATH/PYTHONHOME, UV_*/PIP_* variables and
-#       config files that redirect the index or the interpreter -- no marker, same verdicts;
+#   R1  the gates are not steered by these parts of the caller's environment: an activated
+#       venv (bin/ first on PATH, VIRTUAL_ENV), a .venv in the checkout, PYTHONPATH/PYTHONHOME,
+#       UV_*/PIP_* variables and config files that redirect the index or the interpreter -- no
+#       marker, same verdicts;
 #   R2  the lock-related steps of ci.yml and release.yml (extracted word for word by
 #       scripts/tests/ci_step.py) stop at the gate with a planted package, before anything is
 #       installed; the counter-probe without the gate step installs it and the marker appears.
+# The counter-probes (R6, R2) run install paths WITHOUT the gate, so they install fixture
+# locks that pin only the test wheel, never the checkout's lockfiles; and nothing after the
+# first cases runs unless the committed lockfiles pass the gate (cold verification r3, F1).
 # Needs /usr/bin/python3 >= 3.12 with venv/ensurepip (python3-venv) and PyPI; no uv (the gate
 # installs its own). It never skips: a missing tool fails. LOCK_GATES_VERBOSE=1 prints every
 # refusal's reason. LOCK_GATES_DEB=1 also runs the whole `make deb` (dpkg-buildpackage) on each
@@ -101,9 +105,19 @@ expect ok "pypi: every committed hash is published" "" /usr/bin/python3 -I -B "$
     "$ROOT/controlplane/build-requirements.lock" "$LOCK" "$ROOT/controlplane/uv-requirements.lock"
 # The full gate on the COMMITTED files, not only their grammar: an extra real pin that an
 # author (or an attacker with commit access) left in a lock is caught here in the fast tier
-# (cold verification of the debian umbau, finding 4). Needs PyPI.
+# (cold verification of the debian umbau, finding 4). Needs PyPI. It is a precondition, not
+# just a case: every later case works on copies of these files, so if they fail the gate,
+# nothing else runs (cold verification r3, F1). The counter-probes below never install these
+# files at all -- they use fixture locks that pin only the test's own wheel.
 expect ok "gate: the committed lockfiles pass scripts/check-lockfiles.sh" "" \
     bash "$ROOT/scripts/check-lockfiles.sh"
+if [ "$FAIL" != 0 ]; then
+    echo "lock_gates.sh: the committed lockfiles fail the lock gate; stopping before any case" \
+        "that copies them (fix the lockfiles first)"
+    echo
+    echo "lock gates: $PASS ok, $FAIL wrong"
+    exit 1
+fi
 
 # ---------------------------------------------------------------- the F2 matrix
 # Each case edits controlplane/requirements.lock in a copy of the files both scripts read.
@@ -244,6 +258,17 @@ for p, old in ((d + "/packaging/build-venv.sh", "--only-binary :all: --no-deps)"
 PY
 }
 
+# fixture_locks <copy>: the counter-probes run a path WITHOUT the gate, so they must never
+# install the checkout's own lockfiles (a crafted lock would run there; cold verification r3,
+# F1). Both locks of the copy become fixtures that pin only the test's wheel zzzk1.
+fixture_locks() {
+    local f
+    for f in requirements.lock build-requirements.lock; do
+        printf '# fixture of scripts/tests/lock_gates.sh: only the test wheel\nzzzk1==1.0 \\\n    --hash=sha256:%s\n' \
+            "$K1_HASH" > "$1/controlplane/$f"
+    done
+}
+
 # k1_case <label> <build|runtime|both|uv>: the gate rejects the planted pin, for the expected
 # reason, and nothing of the wheel runs; under LOCK_GATES_DEB also through a whole `make deb`.
 k1_case() {
@@ -306,11 +331,13 @@ else
 fi
 rm -f "$MARK"
 # Counter-probe through the real build path: build-venv.sh of a planted copy with only the
-# gate call removed installs the build lock with zzzk1, and its bin/pip then runs in place of
-# pip -- the marker appears from a bin/ script. (With the gate, above: no marker.)
+# gate call removed installs the build lock -- a fixture holding only zzzk1, never the
+# checkout's lock -- and zzzk1's bin/pip then runs in place of pip: the marker appears from a
+# bin/ script. (With the gate, above: no marker.)
 dir="$TMP/r6-nogate"
 copy_tree "$dir"
 plant "$dir" build
+fixture_locks "$dir"
 /usr/bin/python3 -I - "$dir/packaging/build-venv.sh" <<'PY'
 import sys
 p = sys.argv[1]
@@ -323,7 +350,9 @@ rm -f "$MARK"
 bash "$dir/packaging/build-venv.sh" "$dir/v" > "$TMP/out" 2>&1
 marker_from_bin "R6 counter-probe: build-venv.sh without the gate"
 
-# ------------------------------------------------ R1: the caller's environment takes no part
+# ------------------------------------------------ R1: these parts of the caller's environment
+# (BASH_ENV, exported shell functions and proxy/CA variables are the documented limit, not
+# tested here: whoever sets them already runs code as the caller)
 # An activated venv P with the wheel installed: its bin/ (diff, sort, awk, grep, python3, uv,
 # pip, bash, ...) first on PATH, VIRTUAL_ENV=P, UV_PYTHON pointing into it; PYTHONPATH with a
 # sitecustomize that writes the marker; PYTHONHOME that breaks every non-isolated Python;
@@ -438,8 +467,12 @@ for where in build runtime both uv; do
     replay "release.yml lockfile, $where lock" "$why" "$dir" release.yml lockfile "$LOCKFILE_STEP"
 done
 # Counter-probe: the install step's lockfile lines WITHOUT the gate step before them install
-# the planted runtime pin into T, and its bin/pip runs in place of pip: marker from bin/.
-dir="$TMP/r2-runtime"
+# the runtime lock into T -- a fixture holding only zzzk1, never the checkout's lock -- and
+# zzzk1's bin/pip then runs in place of pip: marker from bin/.
+dir="$TMP/r2-counter"
+copy_tree "$dir"
+plant "$dir" runtime
+fixture_locks "$dir"
 T="$TMP/r2-tool"
 rm -rf "$T"
 /usr/bin/python3 -I -m venv "$T"

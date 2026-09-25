@@ -93,6 +93,23 @@ def test_no_workflow_installs_from_a_lockfile_before_the_lock_gate() -> None:
                 assert "uv-requirements.lock" not in run, f"{wf}/{job}: installs the uv lock"
 
 
+def test_every_job_that_runs_the_lock_tests_passes_the_gate_first() -> None:
+    # lock_gates.sh and make_deb_checks.sh copy the committed lockfiles into their cases; a job
+    # runs them only after a step that ran the gate on those files (cold verification r3, F1).
+    for wf in ("ci.yml", "release.yml"):
+        for job, spec in _jobs(wf).items():
+            gated = False
+            for step in spec.get("steps", []):
+                run = step.get("run", "")
+                if (
+                    "scripts/tests/lock_gates.sh" in run
+                    or "scripts/tests/make_deb_checks.sh" in run
+                ):
+                    assert gated, f"{wf}/{job}: {step.get('name')!r} runs before the lock gate"
+                if re.search(r"(^|\s)bash scripts/check-lockfiles\.sh\s*$", run, re.MULTILINE):
+                    gated = True
+
+
 def test_fast_tier_runs_the_gate_first_and_lockfile_jobs_are_only_the_gate() -> None:
     fast = _jobs("ci.yml")["fast"]["steps"]
     runs = [s["run"] for s in fast if "run" in s]

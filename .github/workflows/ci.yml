@@ -202,12 +202,17 @@ jobs:
       options: --user root
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Every manipulated lock stops make deb, and no lock wheel runs first
+      # The lock gate first (cold verification r3, F1): the tests below copy the committed
+      # lockfiles into their cases, so they run only if these pass. build-dep installs
+      # python3-venv from the Ubuntu archive (nothing from a lockfile); the gate installs its
+      # own uv from the verified uv lock.
+      - name: Lock gate (every lockfile, before anything from one is installed)
         run: |
           apt-get update -qq && apt-get build-dep -y -qq .
-          # build-dep installs python3-venv; the gate installs its own uv, nothing else is
-          # installed here (R2).
           chown -R build:build .
+          runuser -u build -- env HOME=/home/build bash scripts/check-lockfiles.sh
+      - name: Every manipulated lock stops make deb, and no lock wheel runs first
+        run: |
           runuser -u build -- env HOME=/home/build \
             LOCK_GATES_DEB=1 LOCK_GATES_VERBOSE=1 bash scripts/tests/lock_gates.sh
       - name: make deb of a dirty checkout under a poisoned environment (R1, R3, R4)
