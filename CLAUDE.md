@@ -88,10 +88,12 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   `set`, `export`, `unset`, `compgen` or `mapfile` cannot keep the others), sets PATH to
   `/usr/sbin:/usr/bin:/sbin:/bin` and drops exactly `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHON*`,
   `UV_*`, `PIP_*`, `GIT_*`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`, `PERL5DB`, `MAKEFILES`,
-  `MAKEFLAGS`, `GNUMAKEFLAGS`, `BASH_ENV`, `ENV` and `CDPATH`; the gates also read no pip/uv
-  config file and run `/usr/bin/python3 -I`. So neither an activated venv nor a `.venv` in the
-  checkout, a function, nor a Perl (dpkg, debhelper) or make setting of the caller takes part;
-  the make runs of `debian/rules` never see the caller's `MAKEFILES`/`MAKEFLAGS`.
+  `MAKEFLAGS`, `GNUMAKEFLAGS`, `MAKEOVERRIDES`, `BASH_ENV`, `ENV` and `CDPATH`; the gates also
+  read no pip/uv config file and run `/usr/bin/python3 -I`. So neither an activated venv nor a
+  `.venv` in the checkout, a function, nor a Perl (dpkg, debhelper) or make setting of the
+  caller takes part: the make runs of `debian/rules` never see the caller's make flags
+  (`make -i deb` cannot build past a failed gate) or command-line variables (`make deb
+  DEST=...` cannot move the venv).
   `scripts/tests/run.sh` removes the functions and `CDPATH`, `BASH_ENV`, `ENV` first and calls
   `/usr/bin/dirname` before its gate (after the gate, lint and unit use the caller's tools on
   purpose). Not neutralized, a stated limit: what bash does before a script's first line

@@ -48,8 +48,8 @@
 # What it takes from the caller's environment (R1, S4, A3): no shell function (all removed first,
 # through `builtin`), not the PATH (fixed, no venv bin/), none of VIRTUAL_ENV, CONDA_PREFIX,
 # PYTHON*, UV_*, PIP_* (PIP_REQUIREMENT and PIP_CONSTRAINT included), GIT_*, PERL5OPT, PERL5LIB,
-# PERLLIB, PERL5DB, MAKEFILES, MAKEFLAGS, GNUMAKEFLAGS, BASH_ENV, ENV and CDPATH (the block
-# below), no pip/uv configuration file; Python is /usr/bin/python3 -I, uv gets that interpreter
+# PERLLIB, PERL5DB, MAKEFILES, MAKEFLAGS, GNUMAKEFLAGS, MAKEOVERRIDES, BASH_ENV, ENV and CDPATH
+# (the block below), no pip/uv configuration file; Python is /usr/bin/python3 -I, uv gets that interpreter
 # explicitly (--python) and reads no uv.toml (--no-config), so it neither discovers a project
 # venv nor a redirected index. HOME stays (pip/uv caches; every file is hash-checked). Left to
 # the caller, and named as the limit: what bash does before a script's first line (BASH_ENV,
@@ -71,7 +71,8 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 for v in $(compgen -e); do
     case "$v" in
         VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
-            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | MAKEOVERRIDES \
+            | BASH_ENV | ENV | CDPATH)
             unset "$v" ;;
     esac
 done

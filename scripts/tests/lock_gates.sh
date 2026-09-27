@@ -24,10 +24,11 @@
 #   R1  the gates are not steered by these parts of the caller's environment: an activated
 #       venv (bin/ first on PATH, VIRTUAL_ENV), a .venv in the checkout, PYTHONPATH/PYTHONHOME,
 #       UV_*/PIP_* variables and config files that redirect the index or the interpreter,
-#       exported shell functions named like the builtins the scripts call (set, export, cd,
-#       unset, compgen, mapfile), MAKEFILES/MAKEFLAGS/GNUMAKEFLAGS, PERL5OPT/PERL5LIB and
-#       CDPATH (A3) -- no marker, same verdicts; each of these parts is shown to run code
-#       where nothing removes it;
+#       exported shell functions named like the builtins and tools the scripts call (set,
+#       export, cd, unset, compgen, mapfile, ., dirname), MAKEFILES/MAKEFLAGS/GNUMAKEFLAGS/
+#       MAKEOVERRIDES, PERL5OPT/PERL5LIB and CDPATH (A3) -- no marker, same verdicts; each of
+#       these parts is shown to run code where nothing removes it; with LOCK_GATES_DEB, also
+#       `make -i deb` and GNUMAKEFLAGS=-i write no .deb past a refused lock;
 #   R2  the lock-related steps of ci.yml and release.yml (extracted word for word by
 #       scripts/tests/ci_step.py) stop at the gate with a planted package, before anything is
 #       installed; the counter-probe without the gate step installs it and the marker appears.
@@ -53,7 +54,8 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 for v in $(compgen -e); do
     case "$v" in
         VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
-            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | MAKEOVERRIDES \
+            | BASH_ENV | ENV | CDPATH)
             unset "$v" ;;
     esac
 done
@@ -399,20 +401,22 @@ POISON=(env "PATH=$P/bin:/usr/sbin:/usr/bin:/sbin:/bin" "VIRTUAL_ENV=$P"
 mkdir -p "$TMP/r1-perl" "$TMP/r1-cdpath/scripts/tests" "$TMP/r1-cdpath/packaging"
 printf 'open(my $m, ">>", "%s"); print $m "perl ran PERL5OPT: $0\\n"; close $m; 1;\n' "$MARK" \
     > "$TMP/r1-perl/ZzzPoison.pm"
-for f in set export cd unset compgen mapfile; do
+for f in set export cd unset compgen mapfile .; do
     POISON+=("BASH_FUNC_$f%%=() { echo \"function $f ran\" >> '$MARK'; builtin $f \"\$@\"; }")
 done
+POISON+=("BASH_FUNC_dirname%%=() { echo \"function dirname ran\" >> '$MARK'; /usr/bin/dirname \"\$@\"; }")
 POISON+=("PERL5OPT=-MZzzPoison" "PERL5LIB=$TMP/r1-perl" "CDPATH=$TMP/r1-cdpath")
 # make's own variables go only to the scripts started directly (POISON_MAKE): `make deb` is the
 # caller's own make, which reads them before make-deb.sh starts (the stated limit); make-deb.sh
 # must keep them from the make runs of debian/rules. MAKEFILES adds a makefile that writes the
-# marker; MAKEFLAGS and GNUMAKEFLAGS set make's SHELL to a script that writes the marker.
+# marker; MAKEFLAGS and GNUMAKEFLAGS set make's SHELL to a script that writes the marker, and
+# MAKEOVERRIDES does so in every recursive make (dh calls debian/rules again for its overrides).
 printf '$(shell echo "MAKEFILES read by make in $(CURDIR)" >> %s)\n' "$MARK" > "$TMP/r1-poison.mk"
 printf '#!/bin/sh\necho "make SHELL from MAKEFLAGS ran in $PWD" >> %s\nexec /bin/sh "$@"\n' "$MARK" \
     > "$TMP/r1-make-shell"
 chmod +x "$TMP/r1-make-shell"
 POISON_MAKE=("MAKEFILES=$TMP/r1-poison.mk" "MAKEFLAGS=-- SHELL=$TMP/r1-make-shell"
-    "GNUMAKEFLAGS=-- SHELL=$TMP/r1-make-shell")
+    "GNUMAKEFLAGS=-- SHELL=$TMP/r1-make-shell" "MAKEOVERRIDES=SHELL=$TMP/r1-make-shell")
 # Each new part of the poison is sharp: where nothing removes it, it runs code.
 sharp() {  # <label> <marker ERE> <command...>
     local label="$1" want="$2"
@@ -428,17 +432,21 @@ sharp() {  # <label> <marker ERE> <command...>
     rm -f "$MARK"
 }
 mkdir -p "$TMP/mk-sharp"
-printf 'all:\n\t@:\n' > "$TMP/mk-sharp/Makefile"
+printf 'all:\n\t@$(MAKE) --no-print-directory sub\nsub:\n\t@:\n' > "$TMP/mk-sharp/Makefile"
 sharp "exported functions set, export, cd run in a bash that keeps them" \
     '^function set ran' "${POISON[@]}" /bin/bash -c 'set -e; export X=1; cd /'
 sharp "exported functions unset, compgen, mapfile run when called without builtin" \
     '^function mapfile ran' "${POISON[@]}" /bin/bash -c 'mapfile -t f < /dev/null; compgen -e; unset f'
+sharp "exported functions . and dirname run in a bash that keeps them" \
+    '^function dirname ran' "${POISON[@]}" /bin/bash -c '. /dev/null; dirname /x/y'
 sharp "dirname on the poisoned PATH is the wheel's" '^bin/dirname ran' "${POISON[@]}" dirname /x/y
 sharp "PERL5OPT/PERL5LIB run code in dpkg-parsechangelog" '^perl ran' \
     "${POISON[@]}" /usr/bin/dpkg-parsechangelog -l "$ROOT/debian/changelog" -S Version
-for mv in MAKEFILES MAKEFLAGS GNUMAKEFLAGS; do  # one at a time: each on its own is sharp
+for mv in MAKEFILES MAKEFLAGS GNUMAKEFLAGS MAKEOVERRIDES; do  # each on its own is sharp
     others=()
-    for o in MAKEFILES MAKEFLAGS GNUMAKEFLAGS; do [ "$o" = "$mv" ] || others+=(-u "$o"); done
+    for o in MAKEFILES MAKEFLAGS GNUMAKEFLAGS MAKEOVERRIDES; do
+        [ "$o" = "$mv" ] || others+=(-u "$o")
+    done
     sharp "$mv reaches a make that keeps it" '^(MAKEFILES read|make SHELL from MAKEFLAGS)' \
         "${POISON[@]}" "${POISON_MAKE[@]}" /usr/bin/env "${others[@]}" /usr/bin/make -C "$TMP/mk-sharp"
 done
@@ -500,6 +508,27 @@ if [ -n "${LOCK_GATES_DEB:-}" ]; then
         echo "WRONG R1 make-deb.sh: left a .deb behind"; FAIL=$((FAIL + 1)); rm -f "$TMP/"*.deb
     fi
     no_marker "R1 make-deb.sh (poisoned env + make's variables, K1 pin)"
+    # The caller's make flags never carry the build past the gate: with -i (ignore errors) in
+    # the make runs of debian/rules, a failed build-venv.sh would be ignored and a .deb written
+    # (linuxmuster-squid 7.3.5 did). The caller's own make may ignore make-deb.sh's exit status
+    # (-i is its choice), but no .deb may appear.
+    for how in "make -i deb" "GNUMAKEFLAGS=-i make deb"; do
+        if [ "$how" = "make -i deb" ]; then
+            make -i -C "$dir" deb > "$TMP/out" 2>&1
+        else
+            env GNUMAKEFLAGS=-i make -C "$dir" deb > "$TMP/out" 2>&1
+        fi
+        if compgen -G "$TMP/"'*.deb' > /dev/null; then
+            echo "WRONG R1 $how (K1 pin): wrote a .deb although the gate refused the lock"
+            FAIL=$((FAIL + 1)); rm -f "$TMP/"*.deb
+        elif grep -q "pins differ from a fresh" "$TMP/out"; then
+            echo "ok    R1 $how (K1 pin): refused by the gate, no .deb"; PASS=$((PASS + 1))
+        else
+            echo "WRONG R1 $how (K1 pin): no .deb, but no refusal by the gate either"
+            FAIL=$((FAIL + 1)); tail -10 "$TMP/out" | sed 's/^/      /'
+        fi
+    done
+    no_marker "R1 make -i deb / GNUMAKEFLAGS=-i (K1 pin)"
 fi
 
 # ------------------------------------------------ R2: CI verifies before it installs

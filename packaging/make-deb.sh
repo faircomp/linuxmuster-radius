@@ -30,8 +30,11 @@
 # unpacked source package) is the tree built in place.
 
 # Which programs run is not left to the caller (R1, A3). dpkg-buildpackage, dpkg-parsechangelog
-# and debhelper are Perl, and the make runs of debian/rules read MAKEFILES, MAKEFLAGS and
-# GNUMAKEFLAGS from the environment: none of the caller's reach them. The caller's own `make` of
+# and debhelper are Perl, and the make runs of debian/rules read MAKEFILES, MAKEFLAGS,
+# GNUMAKEFLAGS and (in dh's recursive calls of debian/rules) MAKEOVERRIDES from the environment:
+# none of the caller's reach them. So neither make flags (`make -i deb`: a failed gate would be
+# ignored and a .deb written anyway) nor variables set on the command line (`make deb DEST=...`:
+# the venv would be built for another path) get into debian/rules. The caller's own `make` of
 # `make deb` has read them before this script starts (a stated limit, see CLAUDE.md).
 # The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
 # what is removed and what is left as the limit): first the shell functions, through `builtin`,
@@ -45,7 +48,8 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 for v in $(compgen -e); do
     case "$v" in
         VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
-            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | MAKEOVERRIDES \
+            | BASH_ENV | ENV | CDPATH)
             unset "$v" ;;
     esac
 done

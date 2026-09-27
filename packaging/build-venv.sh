@@ -22,7 +22,8 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 for v in $(compgen -e); do
     case "$v" in
         VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
-            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | MAKEOVERRIDES \
+            | BASH_ENV | ENV | CDPATH)
             unset "$v" ;;
     esac
 done

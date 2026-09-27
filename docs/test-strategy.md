@@ -32,7 +32,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
   beiden Test-Gerüste beginnen mit demselben Block (Liste und Grenzen in CLAUDE.md, "Python
   dependencies"): Shell-Funktionen per `builtin` entfernt, fester PATH, `VIRTUAL_ENV`,
   `CONDA_PREFIX`, `PYTHON*`, `UV_*`, `PIP_*`, `GIT_*`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`,
-  `PERL5DB`, `MAKEFILES`, `MAKEFLAGS`, `GNUMAKEFLAGS`, `BASH_ENV`, `ENV`, `CDPATH` entfernt;
+  `PERL5DB`, `MAKEFILES`, `MAKEFLAGS`, `GNUMAKEFLAGS`, `MAKEOVERRIDES`, `BASH_ENV`, `ENV`,
+  `CDPATH` entfernt;
   nicht neutralisiert (Grenze): was bash vor der ersten Skriptzeile tut (`BASH_ENV`,
   `SHELLOPTS`), eine Funktion namens `builtin`, das eigene `make` des Aufrufers von `make deb`,
   Proxy-/CA-Variablen. Ohne Netz scheitert es nach Sekunden (kurze PyPI-Timeouts, Abbruch beim

@@ -195,6 +195,7 @@ def test_entry_scripts_clean_the_callers_environment_first_with_one_block() -> N
         "MAKEFILES",
         "MAKEFLAGS",
         "GNUMAKEFLAGS",
+        "MAKEOVERRIDES",
         "BASH_ENV",
         "ENV",
         "CDPATH",

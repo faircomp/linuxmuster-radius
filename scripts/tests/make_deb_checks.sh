@@ -27,13 +27,14 @@
 #   R1  run nothing from these parts of the caller's environment: an activated venv with the
 #       K1 wheel (scripts/tests/k1_wheel.py: bin/ tools and a .pth, all writing the marker)
 #       first on PATH, VIRTUAL_ENV, PYTHONPATH with a marker sitecustomize, PYTHONHOME, UV_*/PIP_*
-#       redirections, and a poisoned .venv in the checkout; and (A3) MAKEFILES, MAKEFLAGS and
-#       GNUMAKEFLAGS that would make every make run of debian/rules write the marker (the
-#       caller's own `make deb` in the checkout may read them: the stated limit), PERL5OPT/
-#       PERL5LIB that would do so in every Perl program (dpkg, debhelper), CDPATH, and exported
-#       functions named set, export, cd, unset, compgen and mapfile (`make deb` starts
-#       make-deb.sh through /bin/sh, which does not pass them on; lock_gates.sh starts the
-#       scripts with them directly).
+#       redirections, and a poisoned .venv in the checkout; and (A3) MAKEFILES, MAKEFLAGS,
+#       GNUMAKEFLAGS and MAKEOVERRIDES that would make every make run of debian/rules write the
+#       marker (the caller's own `make deb` in the checkout may read them: the stated limit), a
+#       variable on make's command line (`make deb DEST=...` must not move the venv), PERL5OPT/
+#       PERL5LIB that would write the marker in every Perl program (dpkg, debhelper), CDPATH,
+#       and exported functions named set, export, cd, unset, compgen, mapfile, . and dirname
+#       (`make deb` starts make-deb.sh through /bin/sh, which does not pass them on;
+#       lock_gates.sh starts the scripts with them directly).
 # Any marker line fails the test. Needs git, dpkg-dev, debhelper, python3-venv and PyPI.
 # The harness cleans its own environment with the same block as the gates.
 # The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
@@ -48,7 +49,8 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 for v in $(compgen -e); do
     case "$v" in
         VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
-            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | MAKEOVERRIDES \
+            | BASH_ENV | ENV | CDPATH)
             unset "$v" ;;
     esac
 done
@@ -189,20 +191,25 @@ POISON=(env "PATH=$TMP/activated/bin:/usr/sbin:/usr/bin:/sbin:/bin" "VIRTUAL_ENV
     "UV_INDEX_URL=http://127.0.0.1:9/simple" "PIP_INDEX_URL=http://127.0.0.1:9/simple"
     "PIP_FIND_LINKS=$TMP" "GIT_CONFIG_PARAMETERS='core.fsmonitor'='$TMP/fsmonitor'"
     "GIT_DIR=$TMP/nonexistent" "MAKEFILES=$TMP/poison.mk" "MAKEFLAGS=-- SHELL=$TMP/make-shell"
-    "GNUMAKEFLAGS=-- SHELL=$TMP/make-shell" "PERL5OPT=-MZzzPoison" "PERL5LIB=$TMP/perl"
+    "GNUMAKEFLAGS=-- SHELL=$TMP/make-shell" "MAKEOVERRIDES=SHELL=$TMP/make-shell"
+    "PERL5OPT=-MZzzPoison" "PERL5LIB=$TMP/perl"
     "CDPATH=$TMP/cdpath")
-for f in set export cd unset compgen mapfile; do
+for f in set export cd unset compgen mapfile .; do
     POISON+=("BASH_FUNC_$f%%=() { echo \"function $f ran\" >> '$MARK'; builtin $f \"\$@\"; }")
 done
+POISON+=("BASH_FUNC_dirname%%=() { echo \"function dirname ran\" >> '$MARK'; /usr/bin/dirname \"\$@\"; }")
 rm -f "$MARK"
-(cd "$REPO" && "${POISON[@]}" make deb) > "$TMP/out" 2>&1
+(cd "$REPO" && "${POISON[@]}" make deb DEST=/opt/zzz-moved) > "$TMP/out" 2>&1
 rc=$?
-if [ "$rc" = 0 ] && [ -f "$parent/linuxmuster-radius_${VERSION}_amd64.deb" ]; then
+DEB="$parent/linuxmuster-radius_${VERSION}_amd64.deb"
+if [ "$rc" = 0 ] && [ -f "$DEB" ]; then
     ok "dirty checkout, poisoned environment: make deb builds the .deb"
 else
     wrong "dirty checkout: make deb failed (exit $rc)"
     tail -30 "$TMP/out" | sed 's/^/      /'
 fi
+check "A3 make deb DEST=/opt/zzz-moved: the venv stays at /opt/linuxmuster-radius/venv" \
+    bash -c "dpkg-deb -c '$DEB' > '$TMP/debc' && grep -q ' ./opt/linuxmuster-radius/venv/bin/lmnradius\$' '$TMP/debc' && ! grep -q zzz-moved '$TMP/debc'"
 no_marker "dirty build (.git config, git env, venvs, PYTHONPATH, make, Perl, CDPATH, functions)"
 
 # R4: the warnings, before AND after the build (so they are seen after dpkg's output)

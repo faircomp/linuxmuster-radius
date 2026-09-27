@@ -295,8 +295,10 @@ anderen Befehl): alle Shell-Funktionen des Aufrufers entfernt, per `builtin` (Fu
 `set`, `export`, `unset`, `compgen` oder `mapfile` halten die anderen nicht), fester PATH ohne
 venv-`bin/`, genau `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHON*`, `UV_*`, `PIP_*` (auch
 `PIP_REQUIREMENT`/`PIP_CONSTRAINT`), `GIT_*`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`, `PERL5DB`,
-`MAKEFILES`, `MAKEFLAGS`, `GNUMAKEFLAGS`, `BASH_ENV`, `ENV` und `CDPATH` entfernt (die
-make-Läufe von `debian/rules` und die Perl-Programme von dpkg/debhelper sehen nichts davon),
+`MAKEFILES`, `MAKEFLAGS`, `GNUMAKEFLAGS`, `MAKEOVERRIDES`, `BASH_ENV`, `ENV` und `CDPATH`
+entfernt (die make-Läufe von `debian/rules` und die Perl-Programme von dpkg/debhelper sehen
+nichts davon: `make -i deb` baut nicht an einem roten Tor vorbei, `make deb DEST=…` verlegt das
+venv nicht),
 keine pip-/uv-Konfigurationsdateien, `/usr/bin/python3 -I`, uv mit `--python /usr/bin/python3
 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:** nicht neutralisiert
 ist, was bash vor der ersten Skriptzeile tut (`BASH_ENV`, `SHELLOPTS`/`BASHOPTS`), eine Funktion
