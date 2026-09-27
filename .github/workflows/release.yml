@@ -652,7 +652,13 @@ jobs:
             [ "$i" = 3 ] || sleep $((i * 5))
           done
           if [ "$immutable" != true ]; then
-            echo "::error::$TAG is published but NOT immutable (immutable=${immutable:-unreadable}), its assets can still be replaced: delete release $rid (the tag stays), turn immutable releases on, re-run this job"
+            if [ "$immutable" = false ]; then
+              echo "::error::$TAG is published but NOT immutable, its assets can still be replaced: delete release $rid (the tag stays), turn immutable releases on, re-run this job"
+            else
+              # Unreadable is not "false": the release may well be immutable (and then cannot be
+              # replaced anyway), so never tell anyone to delete it on a failed read.
+              echo "::error::$TAG is published, but whether it is immutable could not be read (${immutable:-no answer}). Do not delete it: check with gh api repos/$GH_REPO/releases/$rid --jq .immutable; only if that prints false, delete release $rid (the tag stays), turn immutable releases on and re-run this job"
+            fi
             exit 1
           fi
           echo "$TAG is published and immutable"
