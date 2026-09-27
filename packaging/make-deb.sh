@@ -195,7 +195,8 @@ if [ -n "$missing" ]; then
 fi
 bad_modes="$(tar -tvJf "$tar" | awk '$1 !~ /^(-rw-r--r--|-rwxr-xr-x|drwxr-xr-x|lrwxrwxrwx)$/')"
 [ -z "$bad_modes" ] || { printf '  %s\n' "$bad_modes" >&2; die "unexpected modes in the source tarball"; }
-say "source tarball holds exactly the tracked files minus .github/.claude ($(wc -l < "$work/expected")), modes 0644/0755"
+say "source tarball holds exactly the tracked files minus .github, .claude and the .gitignore" \
+    "files ($(wc -l < "$work/expected")), modes 0644/0755"
 
 # dpkg-buildpackage wrote the artefacts one level above the build tree (in $work); move them
 # next to the checkout, where CI and the developer expect them.

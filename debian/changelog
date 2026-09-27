@@ -11,6 +11,10 @@ linuxmuster-radius (7.3.5) lmn73; urgency=medium
     handling go on as usual. Until the repository is repaired (see
     docs/operations.md), instance changes are not versioned or are refused
     with git's message.
+  * Correction to the 7.3.4 entry: the source tarball of a release holds the
+    files tracked in git except the CI workflows, the developer tool
+    settings and the two .gitignore files (.gitignore and
+    deploy/e2e/certs/.gitignore), which dpkg-source leaves out by default.
 
  -- Kevin Stenzel <mail@kevin-stenzel.de>  Sun, 27 Sep 2026 15:12:38 +0200
 
