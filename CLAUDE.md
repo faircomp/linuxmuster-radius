@@ -246,9 +246,11 @@ real docker-compose winbind/EAP E2E (**Samba AD DC + joined FreeRADIUS +
 `eapol_test` supplicant**) that proves *teacher→Access-Accept (+correct VLAN) /
 student-on-teacher-SSID→Access-Reject / wrong-password→Reject / non-`wifi` user→Reject*,
 as well as multischool, update/rollback, and `.deb` install tests — needs real Linux
-with **Docker**. **crabbox** leases an ephemeral Proxmox VM for this (provider in
-`.claude/settings.json`, token only in the gitignored `.claude/settings.local.json`;
-`crabbox doctor`). Rules/details: the `/test` skill (`.claude/skills/test/SKILL.md`).
+with **Docker**. **crabbox** leases an ephemeral Proxmox VM for this (provider settings and
+token only in the gitignored `.claude/settings.local.json`, never in the versioned
+`.claude/settings.json`; `crabbox doctor`). **Not usable at the moment** (2026-09-27): its
+Proxmox user was removed, so the heavy tier does not run until Kevin sets it up again.
+Rules/details: the `/test` skill (`.claude/skills/test/SKILL.md`).
 
 - **One aggregate runner:** `bash scripts/tests/run.sh [gate|lint|unit|quick|locks|e2e|all]`
   (created in P0/P1). Every mode but `e2e` runs the lock gate first (network needed); if it

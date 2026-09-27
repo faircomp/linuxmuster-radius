@@ -18,7 +18,7 @@
 #   * modes as git records them (0644/0755, directories 0755), whatever the umask of the
 #     checkout or of this build; mtimes = the changelog date; tracked symlinks stay symlinks.
 # Deliberate exclusions from the published source: .github (workflows) and .claude
-# (developer tooling with internal endpoints/token ids); dpkg-source drops .gitignore files.
+# (developer tooling for Claude Code, not part of the package); dpkg-source drops .gitignore files.
 #
 # git only reads here, and nothing configured in the checkout runs: git's ownership guard stays
 # on (no safe.directory waiver -- a checkout owned by another user is refused, as git refuses

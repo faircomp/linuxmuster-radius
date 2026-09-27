@@ -18,9 +18,15 @@ which the sandboxed dev box lacks. This suite is **authored here, run by the
 operator**: crabbox leases an ephemeral Proxmox VM, rsyncs the working tree, runs
 the suite, and tears down.
 
-Provider env (proxmox) comes from `.claude/settings.json` (the **non-secret** provider
-config). The `CRABBOX_PROXMOX_TOKEN_SECRET` lives **only** in the gitignored
-`.claude/settings.local.json` — never commit it. Confirm with `crabbox doctor`.
+The provider settings (`CRABBOX_PROVIDER`, `CRABBOX_PROXMOX_*`: API URL, token id and
+secret, node, template, storage, bridge) live **only** in the gitignored
+`.claude/settings.local.json` (`env` block) — never in the versioned `.claude/settings.json`,
+which holds only the crabbox permissions: they are internal details of Kevin's lab and this
+repository is public. Confirm with `crabbox doctor`.
+
+> **State (2026-09-27): crabbox cannot lease boxes right now** — its Proxmox user was
+> removed. Until Kevin sets it up again, the heavy tier does not run; say so in every
+> report instead of claiming the E2E.
 
 ## Single-box flow (warm once → reuse the slug → stop)
 
