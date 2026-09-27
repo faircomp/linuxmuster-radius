@@ -51,8 +51,9 @@ lmnradius health                                            # {"status":"ok"}
 ```
 Der `postinst` legt den System-User `lmnradius`, `/etc/linuxmuster-radius/{config.yml (0600,
 zufälliges Token),secrets,certs}` und das State-Verzeichnis als Git-Repo an (jede Instanz-
-Änderung ein Commit, `git -C /var/lib/linuxmuster-radius/instances log`) und startet den
-Dienst. Das Image (`ghcr.io/faircomp/linuxmuster-radius`, **public**) wird bei `reconcile`
+Änderung ein Commit, `sudo -u lmnradius git -C /var/lib/linuxmuster-radius/instances log` —
+als der Besitzer `lmnradius`: root selbst lehnt git dort mit „dubious ownership“ ab) und startet
+den Dienst. Das Image (`ghcr.io/faircomp/linuxmuster-radius`, **public**) wird bei `reconcile`
 gezogen.
 *(Optionale Härtung: `deploy/docker-socket-proxy.yml` starten und `docker_host: "tcp://127.0.0.1:2375"` in `config.yml` setzen.)*
 
