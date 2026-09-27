@@ -3,6 +3,14 @@ linuxmuster-radius (7.3.5) lmn73; urgency=medium
   * The API's OpenAPI document (/openapi.json, the interactive docs under
     /docs) now reports the package version instead of 0.1.0, like
     GET /v1/version.
+  * A failing git step in the instance change log
+    (/var/lib/linuxmuster-radius/instances) no longer aborts the package
+    configuration: up to 7.3.4 it left the package half-configured. Each
+    failure now prints a WARNING line with the step and the repository
+    (below git's own message), and the configuration and the service
+    handling go on as usual. Until the repository is repaired (see
+    docs/operations.md), instance changes are not versioned or are refused
+    with git's message.
 
  -- Kevin Stenzel <mail@kevin-stenzel.de>  Sun, 27 Sep 2026 15:12:38 +0200
 
