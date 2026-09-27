@@ -116,7 +116,7 @@ jobs:
   # build-requirements.in (an extra or missing pin), a pin younger than seven days, a hash PyPI
   # does not publish, or a locked version without a wheel for the target (CPython 3.12,
   # glibc 2.39, x86_64). The fast tier and the build (packaging/build-venv.sh) run the same
-  # gate first; release.yml carries this job character for character.
+  # gate first; release.yml carries this job character for character, but for its display name.
   lockfile:
     runs-on: ubuntu-24.04
     steps:

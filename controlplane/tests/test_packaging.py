@@ -118,9 +118,23 @@ def test_fast_tier_runs_the_gate_first_and_lockfile_jobs_are_only_the_gate() -> 
         steps = _jobs(wf)["lockfile"]["steps"]
         assert [s["run"].strip() for s in steps if "run" in s] == [GATE_STEP]
         assert not any("setup-python" in s.get("uses", "") for s in steps)
-    assert _jobs("ci.yml")["lockfile"] == _jobs("release.yml")["lockfile"]
+    ci_lockfile, release_lockfile = (
+        dict(_jobs("ci.yml")["lockfile"]),
+        dict(_jobs("release.yml")["lockfile"]),
+    )
+    assert release_lockfile.pop("name") == "release: lockfile"
+    assert ci_lockfile == release_lockfile
     # the release waits for it
     assert "lockfile" in _jobs("release.yml")["release"]["needs"]
+
+
+def test_release_jobs_never_carry_the_name_of_a_required_ci_check() -> None:
+    # The main ruleset requires the ci.yml jobs by name; a release.yml run on the same commit
+    # (workflow_dispatch on a PR branch) must not report a check that could stand in for one.
+    ci_names = {spec.get("name", key) for key, spec in _jobs("ci.yml").items()}
+    for key, spec in _jobs("release.yml").items():
+        assert spec.get("name") == f"release: {key}", f"release.yml/{key}: display name"
+        assert spec["name"] not in ci_names
 
 
 def test_make_deb_never_waives_the_git_ownership_guard_wholesale() -> None:
