@@ -50,7 +50,9 @@ def create_app(
 ) -> FastAPI:
     """Build the FastAPI app wiring routes to the store, reconciler and docker service."""
     verify = make_verify_token(settings)
-    app = FastAPI(title="linuxmuster-radius control plane")
+    # The OpenAPI document carries the package version (debian/changelog via setup.py), like
+    # GET /v1/version; without it FastAPI reports its own default, 0.1.0.
+    app = FastAPI(title="linuxmuster-radius control plane", version=dist_version("lmnradius"))
 
     @app.exception_handler(DockerException)
     async def _docker_unreachable(_request: Request, exc: DockerException) -> JSONResponse:

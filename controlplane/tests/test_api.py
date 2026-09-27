@@ -34,6 +34,14 @@ def test_version(client: TestClient, auth_headers: dict[str, str]) -> None:
     assert resp.json() == {"version": dist_version("lmnradius")}
 
 
+def test_openapi_reports_the_package_version(client: TestClient) -> None:
+    # Up to 7.3.4 /openapi.json said "0.1.0" (FastAPI's default), whatever the package was.
+    resp = client.get("/openapi.json")
+    assert resp.status_code == 200
+    assert resp.json()["info"]["version"] == dist_version("lmnradius")
+    assert resp.json()["info"]["version"] != "0.1.0"
+
+
 def test_missing_token_is_401(client: TestClient) -> None:
     resp = client.get("/v1/instances")
     assert resp.status_code == 401

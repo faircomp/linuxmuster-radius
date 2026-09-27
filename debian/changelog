@@ -1,3 +1,11 @@
+linuxmuster-radius (7.3.5) lmn73; urgency=medium
+
+  * The API's OpenAPI document (/openapi.json, the interactive docs under
+    /docs) now reports the package version instead of 0.1.0, like
+    GET /v1/version.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Sun, 27 Sep 2026 15:12:38 +0200
+
 linuxmuster-radius (7.3.4) lmn73; urgency=medium
 
   * The package is now built with debhelper (dpkg-buildpackage) instead of a
