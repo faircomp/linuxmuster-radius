@@ -289,14 +289,21 @@ genau das `uv==` aus `uv-requirements.in` mit von PyPI veröffentlichten Hashes 
 erst dann installiert es dieses uv in ein eigenes, isoliertes venv und ruft es per absolutem
 Pfad auf; uv löst `pyproject.toml`/`build-requirements.in` neu auf, die Pins müssen genau
 diese Hülle sein, und jeder Hash muss von PyPI für genau diese Fassung stammen. Aus der
-Umgebung des Aufrufers nehmen die Tore weder Programme noch Paketquellen: fester PATH ohne
-venv-`bin/`, `/usr/bin/python3 -I`, `VIRTUAL_ENV`/`PYTHON*`/`UV_*`/`PIP_*` entfernt (auch
-`PIP_REQUIREMENT`/`PIP_CONSTRAINT`), keine pip-/uv-Konfigurationsdateien, uv mit `--python
-/usr/bin/python3 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:**
-nicht neutralisiert sind `BASH_ENV` (bash führt es vor der ersten Skriptzeile aus),
-exportierte Shell-Funktionen und Proxy-/CA-Variablen (`HTTPS_PROXY`, `SSL_CERT_FILE`,
-`REQUESTS_CA_BUNDLE`, …), die bestimmen, wem das Tor als PyPI vertraut; wer die Umgebung des
-Aufrufers so setzt, führt ohnehin Code als dieser aus. Ein
+Umgebung des Aufrufers nehmen die Tore, der Bau (`build-venv.sh`, `make-deb.sh`) und die
+Test-Gerüste weder Programme noch Paketquellen; sie beginnen mit demselben Block (vor jedem
+anderen Befehl): alle Shell-Funktionen des Aufrufers entfernt, per `builtin` (Funktionen namens
+`set`, `export`, `unset`, `compgen` oder `mapfile` halten die anderen nicht), fester PATH ohne
+venv-`bin/`, genau `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHON*`, `UV_*`, `PIP_*` (auch
+`PIP_REQUIREMENT`/`PIP_CONSTRAINT`), `GIT_*`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`, `PERL5DB`,
+`MAKEFILES`, `MAKEFLAGS`, `GNUMAKEFLAGS`, `BASH_ENV`, `ENV` und `CDPATH` entfernt (die
+make-Läufe von `debian/rules` und die Perl-Programme von dpkg/debhelper sehen nichts davon),
+keine pip-/uv-Konfigurationsdateien, `/usr/bin/python3 -I`, uv mit `--python /usr/bin/python3
+--no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:** nicht neutralisiert
+ist, was bash vor der ersten Skriptzeile tut (`BASH_ENV`, `SHELLOPTS`/`BASHOPTS`), eine Funktion
+namens `builtin`, das eigene `make` des Aufrufers von `make deb`, die Konfiguration von
+dpkg-buildpackage und `DEB_*`/`DH_*`, `LD_PRELOAD` sowie Proxy-/CA-Variablen (`HTTPS_PROXY`,
+`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, …), die bestimmen, wem das Tor als PyPI vertraut; wer die
+Umgebung des Aufrufers so setzt, führt ohnehin Code als dieser aus. Ein
 zusätzlicher Pin mit echten Hashes wird so abgewiesen, bevor sein Code läuft (nachgewiesen:
 die K1-, R1- und R2-Fälle in `scripts/tests/lock_gates.sh`, die Marker entstehen nie; die
 Gegenproben ohne Tor erzeugen sie).

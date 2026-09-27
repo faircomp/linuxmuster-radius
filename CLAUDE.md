@@ -80,12 +80,26 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   gate) install fixture locks that pin only the test wheel, never the checkout's. It verifies
   all three locks — grammar, every hash on PyPI, pin set == closure of the declared inputs
   (uv re-resolves `pyproject.toml`/`build-requirements.in`) — and installs the uv it needs
-  itself, from the verified uv lock into an isolated venv, called by absolute path. The
-  gates run `/usr/bin/python3 -I`, set a fixed PATH and drop `VIRTUAL_ENV`, `PYTHON*`,
-  `UV_*` and `PIP_*` (and pip/uv config files), so an activated venv or a `.venv` in the
-  checkout takes no part. Not neutralized, a stated limit: `BASH_ENV`, exported shell
-  functions and proxy/CA variables (`HTTPS_PROXY`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, …)
-  — whoever sets those already runs code as the caller, or decides whom the gate trusts as PyPI.
+  itself, from the verified uv lock into an isolated venv, called by absolute path.
+  **The caller's environment:** `scripts/check-lockfiles.sh`, `packaging/build-venv.sh`,
+  `packaging/make-deb.sh`, `scripts/tests/lock_gates.sh` and `scripts/tests/make_deb_checks.sh`
+  start with one and the same block (`test_packaging.py` keeps them equal), before any other
+  command: it removes every shell function of the caller, through `builtin` (so functions named
+  `set`, `export`, `unset`, `compgen` or `mapfile` cannot keep the others), sets PATH to
+  `/usr/sbin:/usr/bin:/sbin:/bin` and drops exactly `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHON*`,
+  `UV_*`, `PIP_*`, `GIT_*`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`, `PERL5DB`, `MAKEFILES`,
+  `MAKEFLAGS`, `GNUMAKEFLAGS`, `BASH_ENV`, `ENV` and `CDPATH`; the gates also read no pip/uv
+  config file and run `/usr/bin/python3 -I`. So neither an activated venv nor a `.venv` in the
+  checkout, a function, nor a Perl (dpkg, debhelper) or make setting of the caller takes part;
+  the make runs of `debian/rules` never see the caller's `MAKEFILES`/`MAKEFLAGS`.
+  `scripts/tests/run.sh` removes the functions and `CDPATH`, `BASH_ENV`, `ENV` first and calls
+  `/usr/bin/dirname` before its gate (after the gate, lint and unit use the caller's tools on
+  purpose). Not neutralized, a stated limit: what bash does before a script's first line
+  (`BASH_ENV`, `SHELLOPTS`/`BASHOPTS`), a function named `builtin`, the caller's own `make` of
+  `make deb` (it reads `MAKEFILES`/`MAKEFLAGS` itself), dpkg-buildpackage's configuration files
+  and `DEB_*`/`DH_*` settings, `LD_PRELOAD`, and proxy/CA variables (`HTTPS_PROXY`,
+  `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, …) — whoever sets those already runs code as the
+  caller, or decides whom the gate trusts as PyPI.
   Limit: pins are compared with the closure by name; another real release of a pinned
   package (older or newer, a week old, genuine hashes) that satisfies the declared
   requirements passes every gate — only the review of the lockfile diff catches it.
@@ -257,7 +271,10 @@ Rules/details: the `/test` skill (`.claude/skills/test/SKILL.md`).
   fails, run.sh stops there and runs nothing else. `quick` (default) = gate + lint + unit +
   the lock regression test; `e2e`/`all` run the
   Docker suites and **refuse without `LMNRADIUS_ALLOW_REAL=1`**. Summary:
-  `N passed, M failed, K skipped` (exit ≠ 0 on failure); steps dep-gated.
+  `N passed, M failed, K skipped`, then everything that was not checked (skipped, or not run
+  after a failed gate); steps dep-gated. Exit 0 only if every step ran and passed, 1 on a
+  failure, **77 if a step was skipped** (a missing tool, e2e without `LMNRADIUS_ALLOW_REAL=1`);
+  `LMNRADIUS_ALLOW_SKIP=1` accepts skips on purpose (exit 0, the last line still names them).
 - **Box lifecycle:** `crabbox warmup` → `crabbox run --id <slug> -- 'bash scripts/tests/crabbox_bootstrap.sh'`
   → `crabbox run --id <slug> -- 'LMNRADIUS_ALLOW_REAL=1 bash scripts/tests/run.sh e2e'`
   → `crabbox stop --id <slug>`.

@@ -6,7 +6,9 @@ types-PyYAML==6.0.12.20260906 slipped through the old three-component pattern), 
 resolver uv is pinned by hash in its own lockfile, not as a bare ci.yml `uv==` line (K1), and
 no workflow step installs anything from a lockfile before the lock gate ran in that job (R2).
 scripts/tests/lock_gates.sh replays those steps with a planted package; these tests keep the
-order from being edited away."""
+order from being edited away. The scripts a caller starts clean their environment with one and
+the same block before any other command (A3), and run.sh calls nothing from the caller's PATH
+before its gate (A4); lock_gates.sh (R1) and make_deb_checks.sh show that this holds."""
 
 from __future__ import annotations
 
@@ -146,3 +148,65 @@ def test_make_deb_never_waives_the_git_ownership_guard_wholesale() -> None:
             if line.lstrip().startswith("#"):
                 continue
             assert line.strip() == 'git config --global --add safe.directory "$GITHUB_WORKSPACE"'
+
+
+# The scripts a caller or the build starts: they clean their environment with one block (A3).
+ENV_SCRIPTS = (
+    "scripts/check-lockfiles.sh",
+    "packaging/build-venv.sh",
+    "packaging/make-deb.sh",
+    "scripts/tests/lock_gates.sh",
+    "scripts/tests/make_deb_checks.sh",
+)
+FUNCTIONS_FIRST = "builtin mapfile -t _fns < <(builtin compgen -A function)"
+
+
+def _code(path: str) -> list[str]:
+    """The lines of a shell script without comment lines and blank lines."""
+    text = (ROOT / path).read_text(encoding="utf-8")
+    return [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+
+
+def test_entry_scripts_clean_the_callers_environment_first_with_one_block() -> None:
+    blocks = {}
+    for path in ENV_SCRIPTS:
+        code = _code(path)
+        # before anything else, even `set`: a function of the caller may be named set
+        assert code[0] == FUNCTIONS_FIRST, f"{path}: the first command must remove the functions"
+        end = code.index("done")
+        assert code[end + 1].startswith("set -"), f"{path}: `set` comes right after the block"
+        blocks[path] = code[: end + 1]
+    first = blocks[ENV_SCRIPTS[0]]
+    for path, block in blocks.items():
+        assert block == first, f"{path}: its environment block differs from {ENV_SCRIPTS[0]}'s"
+    assert first[1] == 'builtin unset -f -- "${_fns[@]}"'
+    text = "\n".join(first)
+    for name in (
+        "VIRTUAL_ENV",
+        "CONDA_PREFIX",
+        "PYTHON*",
+        "UV_*",
+        "PIP_*",
+        "GIT_*",
+        "PERL5OPT",
+        "PERL5LIB",
+        "PERLLIB",
+        "PERL5DB",
+        "MAKEFILES",
+        "MAKEFLAGS",
+        "GNUMAKEFLAGS",
+        "BASH_ENV",
+        "ENV",
+        "CDPATH",
+    ):
+        assert re.search(rf"(^|[\s|]){re.escape(name)}(\s|$|\))", text), name
+
+
+def test_run_sh_calls_nothing_from_the_callers_path_before_its_gate() -> None:
+    code = _code("scripts/tests/run.sh")
+    assert code[0] == FUNCTIONS_FIRST
+    assert code[1] == 'builtin unset -f -- "${_fns[@]}"'
+    before_gate = code[: next(i for i, ln in enumerate(code) if ln.startswith("summary()"))]
+    assert any("/usr/bin/dirname" in ln for ln in before_gate)
+    for ln in before_gate:
+        assert not re.search(r"(?<![/\w-])dirname\b", ln), ln

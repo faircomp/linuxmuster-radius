@@ -7,21 +7,26 @@
 # debian/venv-relocate, which makes the shebangs, activate scripts, pyvenv.cfg and .pyc files
 # correct for /opt/linuxmuster-radius/venv. The version of the control plane is the top entry
 # of debian/changelog (controlplane/setup.py reads it).
-set -euo pipefail
 
-# Which programs run is not left to the PATH, venv or Python/pip/uv settings of the caller (R1): a
-# fixed PATH without any venv bin/ (an activated venv, a checkout's .venv), no VIRTUAL_ENV, no
-# PYTHON*, UV_* or PIP_* variables and no pip configuration file. debian/rules calls this script
-# with a bare `bash`, and dpkg-buildpackage may be started by hand, so it cleans up itself. Not
-# neutralized, and named as the limit: BASH_ENV (bash runs it before a script's first line),
-# exported shell functions, and the proxy/CA variables (HTTPS_PROXY, SSL_CERT_FILE,
-# REQUESTS_CA_BUNDLE, ...) that decide whom pip and the gate trust as PyPI. Whoever sets those in
-# the caller's environment already runs code as the caller.
+# debian/rules calls this script with a bare `bash`, and dpkg-buildpackage may be started by hand,
+# so it cleans its environment itself (R1, A3), and reads no pip configuration file.
+# The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
+# what is removed and what is left as the limit): first the shell functions, through `builtin`,
+# so that a function named set, export, unset, compgen or mapfile cannot keep the others; then a
+# fixed PATH and none of the variables that point Python, pip, uv, git, Perl (dpkg), make or bash
+# at other code.
+builtin mapfile -t _fns < <(builtin compgen -A function)
+builtin unset -f -- "${_fns[@]}"
+builtin unset _fns
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
 for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_*) unset "$v" ;; esac
+    case "$v" in
+        VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            unset "$v" ;;
+    esac
 done
+set -euo pipefail
 export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -51,7 +56,11 @@ echo "== lockfiles: grammar and published hashes =="
 "$PY" -I -B "$GATE" lint "${LOCKS[@]}" || die "a lockfile holds a line uv does not write"
 # 2. Every hash is one PyPI publishes for that exact version (pip only checks the file it
 #    downloads, so a replaced sdist or other-platform-wheel hash would pass pip).
-"$PY" -I -B "$GATE" pypi "${LOCKS[@]}" || die "a lockfile hash is not a file PyPI publishes"
+prc=0
+"$PY" -I -B "$GATE" pypi "${LOCKS[@]}" || prc=$?
+[ "$prc" != 3 ] || die "PyPI gave no answer (offline?): the lockfiles are NOT verified," \
+    "nothing is built"
+[ "$prc" = 0 ] || die "a lockfile pin or hash is not what PyPI publishes (FAIL lines above)"
 
 echo "== lockfiles: the uv lock, uv, and pin set == closure of the declared inputs =="
 # 3. scripts/check-lockfiles.sh, the one lock gate: the grammar of all three locks, the uv

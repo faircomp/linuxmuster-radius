@@ -4,25 +4,40 @@
 #
 # Test aggregator for linuxmuster-radius. See docs/test-strategy.md and the
 # /test skill. Modes: gate | lint | unit | quick (default) | locks | e2e | all.
-# Each step is dependency-gated and skips cleanly when a toolchain is missing.
-# e2e/all refuse without LMNRADIUS_ALLOW_REAL=1 (protection against accidental runs).
+# Each step is dependency-gated: a missing toolchain SKIPS the step, and skipped is not passed.
+# Exit status: 0 only if every step of the mode ran and passed; 1 if a step failed (or the gate
+# stopped the run); 77 if nothing failed but a step was skipped. The last line names every step
+# that was not checked. LMNRADIUS_ALLOW_SKIP=1 accepts skips on purpose (exit 0; the last line
+# still names them). e2e/all refuse without LMNRADIUS_ALLOW_REAL=1 (protection against
+# accidental runs): e2e is then skipped, so they end with 77 unless skips are allowed.
 #
 # The lock gate (scripts/check-lockfiles.sh) runs FIRST in every mode but e2e, before anything
 # that could run a package from a lockfile (mypy plugins, pytest, a venv's tools, the lock
-# regression test), started as /bin/bash; the gate fixes its own PATH and drops VIRTUAL_ENV,
-# PYTHON*, UV_* and PIP_*, so neither an activated venv nor the checkout's .venv takes part in
-# it (K1/R1). If it fails, run.sh stops right there: nothing else runs. Only after it passed
-# are the control-plane tools of .venv (created by crabbox_bootstrap) put first on PATH for
-# lint and unit; the lock regression test (`locks`) cleans its environment like the gate.
+# regression test), started as /bin/bash; the gate cleans its own environment (functions, PATH,
+# VIRTUAL_ENV, PYTHON*, UV_*, PIP_*, ...; CLAUDE.md, "Python dependencies"), so neither an
+# activated venv nor the checkout's .venv takes part in it (K1/R1). If it fails, run.sh stops
+# right there: nothing else runs, and the last line says what did not run. Before the gate
+# nothing of the caller's runs here either (A3/A4): the caller's shell functions are removed
+# first, through `builtin` (a function named set, cd, unset, compgen or mapfile cannot keep the
+# others; one named `builtin` can, the stated limit), then CDPATH, BASH_ENV and ENV, and dirname
+# is called by its absolute path. Only after the gate passed are the control-plane tools of
+# .venv (created by crabbox_bootstrap) put first on PATH for lint and unit, which use the
+# caller's tools on purpose; the lock regression test (`locks`) cleans its environment like the
+# gate.
+builtin mapfile -t _fns < <(builtin compgen -A function)
+builtin unset -f -- "${_fns[@]}"
+builtin unset _fns CDPATH BASH_ENV ENV
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(/usr/bin/dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
 
 PASS=0; FAIL=0; SKIP=0
+SKIPPED=()   # "<step> (<why>)" of every skipped step, for the last line
+NOT_RUN=""   # the steps the failed gate kept from running
 pass(){ PASS=$((PASS + 1)); printf '  [PASS] %s\n' "$1"; }
 fail(){ FAIL=$((FAIL + 1)); printf '  [FAIL] %s\n' "$1"; }
-skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %s (%s)\n' "$1" "$2"; }
+skip(){ SKIP=$((SKIP + 1)); SKIPPED+=("$1 ($2)"); printf '  [SKIP] %s (%s)\n' "$1" "$2"; }
 have(){ command -v "$1" >/dev/null 2>&1; }
 
 # run_step <name> <required-tool> <command...>
@@ -32,12 +47,28 @@ run_step(){
   if "$@"; then pass "$name"; else fail "$name"; fi
 }
 
+# The last line: the counts, then everything that was not checked; the exit status (see above).
 summary(){
+  local line="$PASS passed, $FAIL failed, $SKIP skipped" skipped rc=0
   echo
-  echo "$PASS passed, $FAIL failed, $SKIP skipped"
-  [ "$FAIL" -eq 0 ]
+  if [ -n "$NOT_RUN" ]; then line+="; NOT run (the lock gate failed): $NOT_RUN"; fi
+  if [ "$SKIP" -gt 0 ]; then
+    skipped="$(printf '%s, ' "${SKIPPED[@]}")"
+    line+="; NOT checked: ${skipped%, }"
+  fi
+  if [ "$FAIL" -gt 0 ]; then
+    rc=1
+  elif [ "$SKIP" -gt 0 ] && [ "${LMNRADIUS_ALLOW_SKIP:-0}" = 1 ]; then
+    line+=" (skips accepted: LMNRADIUS_ALLOW_SKIP=1)"
+  elif [ "$SKIP" -gt 0 ]; then
+    rc=77
+    line+=" -> INCOMPLETE, exit 77 (LMNRADIUS_ALLOW_SKIP=1 accepts skips)"
+  fi
+  echo "$line"
+  return "$rc"
 }
 
+# gate <steps that follow>: they run only if the gate passes.
 gate(){
   echo "== lock gate =="
   if /bin/bash scripts/check-lockfiles.sh; then
@@ -46,6 +77,7 @@ gate(){
     if [ -x "$ROOT/.venv/bin/ruff" ]; then export PATH="$ROOT/.venv/bin:$PATH"; fi
   else
     fail "lock gate"
+    NOT_RUN="$*"
     echo "lock gate failed: run.sh stops here, nothing else runs (lint, unit, the lock" \
       "regression test and e2e could all run code from a lockfile)"
     summary
@@ -121,14 +153,16 @@ e2e(){
 
 mode="${1:-quick}"
 case "$mode" in
-  gate)  gate ;;
-  lint)  gate; lint ;;
-  unit)  gate; unit ;;
-  quick) gate; lint; unit; locks ;;
-  locks) gate; locks ;;
-  e2e)   e2e ;;
-  all)   gate; lint; unit; locks; e2e ;;
+  gate)  steps=() ;;
+  lint)  steps=(lint) ;;
+  unit)  steps=(unit) ;;
+  quick) steps=(lint unit locks) ;;
+  locks) steps=(locks) ;;
+  e2e)   steps=(e2e) ;;
+  all)   steps=(lint unit locks e2e) ;;
   *) echo "usage: run.sh [gate|lint|unit|quick|locks|e2e|all]" >&2; exit 2 ;;
 esac
+[ "$mode" = e2e ] || gate "${steps[@]}"
+for step in "${steps[@]}"; do "$step"; done
 
 summary

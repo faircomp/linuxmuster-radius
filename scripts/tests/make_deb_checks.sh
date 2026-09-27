@@ -27,15 +27,32 @@
 #   R1  run nothing from these parts of the caller's environment: an activated venv with the
 #       K1 wheel (scripts/tests/k1_wheel.py: bin/ tools and a .pth, all writing the marker)
 #       first on PATH, VIRTUAL_ENV, PYTHONPATH with a marker sitecustomize, PYTHONHOME, UV_*/PIP_*
-#       redirections, and a poisoned .venv in the checkout.
+#       redirections, and a poisoned .venv in the checkout; and (A3) MAKEFILES, MAKEFLAGS and
+#       GNUMAKEFLAGS that would make every make run of debian/rules write the marker (the
+#       caller's own `make deb` in the checkout may read them: the stated limit), PERL5OPT/
+#       PERL5LIB that would do so in every Perl program (dpkg, debhelper), CDPATH, and exported
+#       functions named set, export, cd, unset, compgen and mapfile (`make deb` starts
+#       make-deb.sh through /bin/sh, which does not pass them on; lock_gates.sh starts the
+#       scripts with them directly).
 # Any marker line fails the test. Needs git, dpkg-dev, debhelper, python3-venv and PyPI.
-set -uo pipefail
-
+# The harness cleans its own environment with the same block as the gates.
+# The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
+# what is removed and what is left as the limit): first the shell functions, through `builtin`,
+# so that a function named set, export, unset, compgen or mapfile cannot keep the others; then a
+# fixed PATH and none of the variables that point Python, pip, uv, git, Perl (dpkg), make or bash
+# at other code.
+builtin mapfile -t _fns < <(builtin compgen -A function)
+builtin unset -f -- "${_fns[@]}"
+builtin unset _fns
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
 for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_* | GIT_*) unset "$v" ;; esac
+    case "$v" in
+        VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            unset "$v" ;;
+    esac
 done
+set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 TMP="$(mktemp -d)"
@@ -157,11 +174,26 @@ done
 mkdir -p "$TMP/pythonpath"
 printf "open(%s, 'a').write('sitecustomize ran\\\\n')\n" "'$MARK'" > "$TMP/pythonpath/sitecustomize.py"
 plant_git "$REPO"
+# A3: make's variables write the marker in every make but the caller's own in $REPO; Perl's in
+# every Perl program; CDPATH would send make-deb.sh's `cd packaging/..` elsewhere.
+printf 'ifneq ($(CURDIR),%s)\n$(shell echo "MAKEFILES read by make in $(CURDIR)" >> %s)\nendif\n' \
+    "$REPO" "$MARK" > "$TMP/poison.mk"
+printf '#!/bin/sh\n[ "$PWD" = %s ] || echo "make SHELL from MAKEFLAGS ran in $PWD" >> %s\nexec /bin/sh "$@"\n' \
+    "$REPO" "$MARK" > "$TMP/make-shell"
+chmod +x "$TMP/make-shell"
+mkdir -p "$TMP/perl" "$TMP/cdpath/packaging" "$TMP/cdpath/scripts"
+printf 'open(my $m, ">>", "%s"); print $m "perl ran PERL5OPT: $0\\n"; close $m; 1;\n' "$MARK" \
+    > "$TMP/perl/ZzzPoison.pm"
 POISON=(env "PATH=$TMP/activated/bin:/usr/sbin:/usr/bin:/sbin:/bin" "VIRTUAL_ENV=$TMP/activated"
     "PYTHONPATH=$TMP/pythonpath" "PYTHONHOME=$TMP/activated" "UV_PYTHON=$TMP/activated/bin/python3"
     "UV_INDEX_URL=http://127.0.0.1:9/simple" "PIP_INDEX_URL=http://127.0.0.1:9/simple"
     "PIP_FIND_LINKS=$TMP" "GIT_CONFIG_PARAMETERS='core.fsmonitor'='$TMP/fsmonitor'"
-    "GIT_DIR=$TMP/nonexistent")
+    "GIT_DIR=$TMP/nonexistent" "MAKEFILES=$TMP/poison.mk" "MAKEFLAGS=-- SHELL=$TMP/make-shell"
+    "GNUMAKEFLAGS=-- SHELL=$TMP/make-shell" "PERL5OPT=-MZzzPoison" "PERL5LIB=$TMP/perl"
+    "CDPATH=$TMP/cdpath")
+for f in set export cd unset compgen mapfile; do
+    POISON+=("BASH_FUNC_$f%%=() { echo \"function $f ran\" >> '$MARK'; builtin $f \"\$@\"; }")
+done
 rm -f "$MARK"
 (cd "$REPO" && "${POISON[@]}" make deb) > "$TMP/out" 2>&1
 rc=$?
@@ -171,7 +203,7 @@ else
     wrong "dirty checkout: make deb failed (exit $rc)"
     tail -30 "$TMP/out" | sed 's/^/      /'
 fi
-no_marker "dirty build (fsmonitor, filter, hooks, git env, activated venv, .venv, PYTHONPATH)"
+no_marker "dirty build (.git config, git env, venvs, PYTHONPATH, make, Perl, CDPATH, functions)"
 
 # R4: the warnings, before AND after the build (so they are seen after dpkg's output)
 warns() {  # <label> <fixed string>: printed twice

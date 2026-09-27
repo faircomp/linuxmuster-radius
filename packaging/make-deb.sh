@@ -28,18 +28,28 @@
 # worktree whose repository is not mounted into the container, a refused owner -- stops the
 # build: packing the tree as it is would pack everything in it. Only without any .git (an
 # unpacked source package) is the tree built in place.
-set -euo pipefail
 
-# Which programs run is not left to the PATH, venv, Python/pip/uv or git variables of the caller
-# (R1). Not neutralized, and named as the limit: BASH_ENV (bash runs it before a script's first
-# line), exported shell functions, and the proxy/CA variables (HTTPS_PROXY, SSL_CERT_FILE,
-# REQUESTS_CA_BUNDLE, ...) that decide whom the build trusts as PyPI. Whoever sets those in the
-# caller's environment already runs code as the caller.
+# Which programs run is not left to the caller (R1, A3). dpkg-buildpackage, dpkg-parsechangelog
+# and debhelper are Perl, and the make runs of debian/rules read MAKEFILES, MAKEFLAGS and
+# GNUMAKEFLAGS from the environment: none of the caller's reach them. The caller's own `make` of
+# `make deb` has read them before this script starts (a stated limit, see CLAUDE.md).
+# The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
+# what is removed and what is left as the limit): first the shell functions, through `builtin`,
+# so that a function named set, export, unset, compgen or mapfile cannot keep the others; then a
+# fixed PATH and none of the variables that point Python, pip, uv, git, Perl (dpkg), make or bash
+# at other code.
+builtin mapfile -t _fns < <(builtin compgen -A function)
+builtin unset -f -- "${_fns[@]}"
+builtin unset _fns
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
 for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_* | GIT_*) unset "$v" ;; esac
+    case "$v" in
+        VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            unset "$v" ;;
+    esac
 done
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PKG=linuxmuster-radius

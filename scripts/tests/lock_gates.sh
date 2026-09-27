@@ -23,8 +23,11 @@
 #       write the marker, and so does its .pth;
 #   R1  the gates are not steered by these parts of the caller's environment: an activated
 #       venv (bin/ first on PATH, VIRTUAL_ENV), a .venv in the checkout, PYTHONPATH/PYTHONHOME,
-#       UV_*/PIP_* variables and config files that redirect the index or the interpreter -- no
-#       marker, same verdicts;
+#       UV_*/PIP_* variables and config files that redirect the index or the interpreter,
+#       exported shell functions named like the builtins the scripts call (set, export, cd,
+#       unset, compgen, mapfile), MAKEFILES/MAKEFLAGS/GNUMAKEFLAGS, PERL5OPT/PERL5LIB and
+#       CDPATH (A3) -- no marker, same verdicts; each of these parts is shown to run code
+#       where nothing removes it;
 #   R2  the lock-related steps of ci.yml and release.yml (extracted word for word by
 #       scripts/tests/ci_step.py) stop at the gate with a planted package, before anything is
 #       installed; the counter-probe without the gate step installs it and the marker appears.
@@ -36,15 +39,25 @@
 # refusal's reason. LOCK_GATES_DEB=1 also runs the whole `make deb` (dpkg-buildpackage) on each
 # tampered tree and requires it to fail without a .deb and without a marker; run that inside
 # the build image, as a user who may write the checkout, after `apt-get build-dep .` (the
-# command is in the Makefile). The harness drops the same PATH/PYTHON*/UV_*/PIP_*/GIT_* parts of
-# its environment as the gates.
-set -uo pipefail
-
+# command is in the Makefile). The harness cleans its own environment with the same block as the
+# gates.
+# The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
+# what is removed and what is left as the limit): first the shell functions, through `builtin`,
+# so that a function named set, export, unset, compgen or mapfile cannot keep the others; then a
+# fixed PATH and none of the variables that point Python, pip, uv, git, Perl (dpkg), make or bash
+# at other code.
+builtin mapfile -t _fns < <(builtin compgen -A function)
+builtin unset -f -- "${_fns[@]}"
+builtin unset _fns
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
 for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_* | GIT_*) unset "$v" ;; esac
+    case "$v" in
+        VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            unset "$v" ;;
+    esac
 done
+set -uo pipefail
 export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -352,8 +365,9 @@ bash "$dir/packaging/build-venv.sh" "$dir/v" > "$TMP/out" 2>&1
 marker_from_bin "R6 counter-probe: build-venv.sh without the gate"
 
 # ------------------------------------------------ R1: these parts of the caller's environment
-# (BASH_ENV, exported shell functions and proxy/CA variables are the documented limit, not
-# tested here: whoever sets them already runs code as the caller)
+# (what bash does before a script's first line -- BASH_ENV, SHELLOPTS -- a function named
+# `builtin` and proxy/CA variables are the documented limit, not tested here: whoever sets them
+# already runs code as the caller)
 # An activated venv P with the wheel installed: its bin/ (diff, sort, awk, grep, python3, uv,
 # pip, bash, ...) first on PATH, VIRTUAL_ENV=P, UV_PYTHON pointing into it; PYTHONPATH with a
 # sitecustomize that writes the marker; PYTHONHOME that breaks every non-isolated Python;
@@ -378,6 +392,64 @@ POISON=(env "PATH=$P/bin:/usr/sbin:/usr/bin:/sbin:/bin" "VIRTUAL_ENV=$P"
     "UV_FIND_LINKS=$WHEELDIR" "UV_CONFIG_FILE=$TMP/r1-uv.toml"
     "PIP_INDEX_URL=http://127.0.0.1:9/simple" "PIP_FIND_LINKS=$WHEELDIR"
     "PIP_CONFIG_FILE=$TMP/r1-pip.conf" "GIT_CONFIG_PARAMETERS='core.fsmonitor'='$TMP/r1-fsmonitor'")
+# A3: exported functions named like the builtins the scripts call before and while they clean
+# their environment (each writes the marker, then does what the builtin does); Perl's own
+# variables, which dpkg-parsechangelog, dpkg-buildpackage and debhelper read; CDPATH, which
+# would send `cd scripts/..` of a script started by a relative path into $TMP/r1-cdpath.
+mkdir -p "$TMP/r1-perl" "$TMP/r1-cdpath/scripts/tests" "$TMP/r1-cdpath/packaging"
+printf 'open(my $m, ">>", "%s"); print $m "perl ran PERL5OPT: $0\\n"; close $m; 1;\n' "$MARK" \
+    > "$TMP/r1-perl/ZzzPoison.pm"
+for f in set export cd unset compgen mapfile; do
+    POISON+=("BASH_FUNC_$f%%=() { echo \"function $f ran\" >> '$MARK'; builtin $f \"\$@\"; }")
+done
+POISON+=("PERL5OPT=-MZzzPoison" "PERL5LIB=$TMP/r1-perl" "CDPATH=$TMP/r1-cdpath")
+# make's own variables go only to the scripts started directly (POISON_MAKE): `make deb` is the
+# caller's own make, which reads them before make-deb.sh starts (the stated limit); make-deb.sh
+# must keep them from the make runs of debian/rules. MAKEFILES adds a makefile that writes the
+# marker; MAKEFLAGS and GNUMAKEFLAGS set make's SHELL to a script that writes the marker.
+printf '$(shell echo "MAKEFILES read by make in $(CURDIR)" >> %s)\n' "$MARK" > "$TMP/r1-poison.mk"
+printf '#!/bin/sh\necho "make SHELL from MAKEFLAGS ran in $PWD" >> %s\nexec /bin/sh "$@"\n' "$MARK" \
+    > "$TMP/r1-make-shell"
+chmod +x "$TMP/r1-make-shell"
+POISON_MAKE=("MAKEFILES=$TMP/r1-poison.mk" "MAKEFLAGS=-- SHELL=$TMP/r1-make-shell"
+    "GNUMAKEFLAGS=-- SHELL=$TMP/r1-make-shell")
+# Each new part of the poison is sharp: where nothing removes it, it runs code.
+sharp() {  # <label> <marker ERE> <command...>
+    local label="$1" want="$2"
+    shift 2
+    rm -f "$MARK"
+    "$@" > "$TMP/out" 2>&1
+    if grep -qE -- "$want" "$MARK" 2> /dev/null; then
+        echo "ok    R1 poison is sharp: $label"; PASS=$((PASS + 1))
+    else
+        echo "WRONG R1 poison is not sharp: $label (no /$want/ in the marker)"; FAIL=$((FAIL + 1))
+        tail -5 "$TMP/out" | sed 's/^/      /'
+    fi
+    rm -f "$MARK"
+}
+mkdir -p "$TMP/mk-sharp"
+printf 'all:\n\t@:\n' > "$TMP/mk-sharp/Makefile"
+sharp "exported functions set, export, cd run in a bash that keeps them" \
+    '^function set ran' "${POISON[@]}" /bin/bash -c 'set -e; export X=1; cd /'
+sharp "exported functions unset, compgen, mapfile run when called without builtin" \
+    '^function mapfile ran' "${POISON[@]}" /bin/bash -c 'mapfile -t f < /dev/null; compgen -e; unset f'
+sharp "dirname on the poisoned PATH is the wheel's" '^bin/dirname ran' "${POISON[@]}" dirname /x/y
+sharp "PERL5OPT/PERL5LIB run code in dpkg-parsechangelog" '^perl ran' \
+    "${POISON[@]}" /usr/bin/dpkg-parsechangelog -l "$ROOT/debian/changelog" -S Version
+for mv in MAKEFILES MAKEFLAGS GNUMAKEFLAGS; do  # one at a time: each on its own is sharp
+    others=()
+    for o in MAKEFILES MAKEFLAGS GNUMAKEFLAGS; do [ "$o" = "$mv" ] || others+=(-u "$o"); done
+    sharp "$mv reaches a make that keeps it" '^(MAKEFILES read|make SHELL from MAKEFLAGS)' \
+        "${POISON[@]}" "${POISON_MAKE[@]}" /usr/bin/env "${others[@]}" /usr/bin/make -C "$TMP/mk-sharp"
+done
+rm -f "$MARK"
+"${POISON[@]}" /bin/bash -c 'builtin cd / && builtin cd scripts/.. && pwd' > "$TMP/out" 2>&1
+if grep -q "r1-cdpath" "$TMP/out"; then
+    echo "ok    R1 poison is sharp: CDPATH sends a relative cd elsewhere"; PASS=$((PASS + 1))
+else
+    echo "WRONG R1 poison is not sharp: CDPATH"; FAIL=$((FAIL + 1)); sed 's/^/      /' "$TMP/out"
+fi
+rm -f "$MARK"
 poison_dotvenv() {  # <checkout copy>: a poisoned .venv with a ruff, so run.sh would use it
     /usr/bin/python3 -I -m venv "$1/.venv"
     "$1/.venv/bin/python" -I -m pip install -q --no-index --no-deps "$WHEEL"
@@ -389,10 +461,11 @@ dir="$TMP/r1-clean"
 copy_tree "$dir"
 poison_dotvenv "$dir"
 rm -f "$MARK"
-expect ok "R1 check (poisoned env, clean locks)" "" "${POISON[@]}" /bin/bash "$dir/scripts/check-lockfiles.sh"
+expect ok "R1 check (poisoned env, clean locks)" "" \
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/scripts/check-lockfiles.sh"
 no_marker "R1 check (poisoned env, clean locks)"
 expect ok "R1 run.sh gate (poisoned env + .venv, clean locks)" "" \
-    "${POISON[@]}" /bin/bash "$dir/scripts/tests/run.sh" gate
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/scripts/tests/run.sh" gate
 no_marker "R1 run.sh gate (poisoned env + .venv, clean locks)"
 # a planted runtime pin is still refused, for the same reason, and nothing of it runs
 dir="$TMP/r1-planted"
@@ -401,14 +474,14 @@ plant "$dir" runtime
 poison_dotvenv "$dir"
 rm -f "$MARK"
 expect fail "R1 check (poisoned env, K1 pin)" "pins differ from a fresh" \
-    "${POISON[@]}" /bin/bash "$dir/scripts/check-lockfiles.sh"
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/scripts/check-lockfiles.sh"
 no_marker "R1 check (poisoned env, K1 pin)"
 expect fail "R1 build-venv (poisoned env, K1 pin)" "pins differ from a fresh" \
-    "${POISON[@]}" /bin/bash "$dir/packaging/build-venv.sh" "$dir/v"
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/packaging/build-venv.sh" "$dir/v"
 no_marker "R1 build-venv (poisoned env, K1 pin)"
 # run.sh lint: the gate runs first and fails, so neither .venv's ruff nor anything else runs
 expect fail "R1 run.sh lint (poisoned env + .venv, K1 pin)" "\[FAIL\] lock gate" \
-    "${POISON[@]}" /bin/bash "$dir/scripts/tests/run.sh" lint
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/scripts/tests/run.sh" lint
 no_marker "R1 run.sh lint (poisoned env + .venv, K1 pin)"
 if [ -n "${LOCK_GATES_DEB:-}" ]; then
     expect fail "R1 make deb (poisoned env + .venv, K1 pin)" "pins differ from a fresh" \
@@ -417,6 +490,16 @@ if [ -n "${LOCK_GATES_DEB:-}" ]; then
         echo "WRONG R1 make deb: left a .deb behind"; FAIL=$((FAIL + 1)); rm -f "$TMP/"*.deb
     fi
     no_marker "R1 make deb (poisoned env + .venv, K1 pin)"
+    # make-deb.sh started directly, with make's variables as well: dpkg-buildpackage runs
+    # `debian/rules clean` (make) and Perl before the gate, so a make or Perl setting or a
+    # function of the caller that got through would write the marker here.
+    expect fail "R1 make-deb.sh (poisoned env + make's variables, K1 pin)" \
+        "pins differ from a fresh" \
+        "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/packaging/make-deb.sh"
+    if compgen -G "$TMP/"'*.deb' > /dev/null; then
+        echo "WRONG R1 make-deb.sh: left a .deb behind"; FAIL=$((FAIL + 1)); rm -f "$TMP/"*.deb
+    fi
+    no_marker "R1 make-deb.sh (poisoned env + make's variables, K1 pin)"
 fi
 
 # ------------------------------------------------ R2: CI verifies before it installs

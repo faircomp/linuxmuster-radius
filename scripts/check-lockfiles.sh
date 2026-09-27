@@ -45,24 +45,37 @@
 # with its genuine hashes) that still satisfies the declared requirements passes every gate;
 # only the review of the lockfile diff catches it.
 #
-# What it takes from the caller's environment (R1, S4): not the PATH (fixed, no venv bin/), not
-# VIRTUAL_ENV or any PYTHON*, UV_* or PIP_* variable (all dropped, PIP_REQUIREMENT and
-# PIP_CONSTRAINT included), no pip/uv configuration file; Python is /usr/bin/python3 -I, uv gets
-# that interpreter explicitly (--python) and reads no uv.toml (--no-config), so it neither
-# discovers a project venv nor a redirected index. HOME stays (pip/uv caches; every file is
-# hash-checked). Not neutralized, and named as the limit: BASH_ENV (bash runs it before a script's
-# first line), exported shell functions, and the proxy/CA variables (HTTPS_PROXY, SSL_CERT_FILE,
-# REQUESTS_CA_BUNDLE, ...) that decide whom the gate trusts as PyPI. Whoever sets those in the
-# caller's environment already runs code as the caller.
+# What it takes from the caller's environment (R1, S4, A3): no shell function (all removed first,
+# through `builtin`), not the PATH (fixed, no venv bin/), none of VIRTUAL_ENV, CONDA_PREFIX,
+# PYTHON*, UV_*, PIP_* (PIP_REQUIREMENT and PIP_CONSTRAINT included), GIT_*, PERL5OPT, PERL5LIB,
+# PERLLIB, PERL5DB, MAKEFILES, MAKEFLAGS, GNUMAKEFLAGS, BASH_ENV, ENV and CDPATH (the block
+# below), no pip/uv configuration file; Python is /usr/bin/python3 -I, uv gets that interpreter
+# explicitly (--python) and reads no uv.toml (--no-config), so it neither discovers a project
+# venv nor a redirected index. HOME stays (pip/uv caches; every file is hash-checked). Left to
+# the caller, and named as the limit: what bash does before a script's first line (BASH_ENV,
+# SHELLOPTS/BASHOPTS), a function named `builtin`, LD_PRELOAD, and the proxy/CA variables
+# (HTTPS_PROXY, SSL_CERT_FILE, REQUESTS_CA_BUNDLE, ...) that decide whom the gate trusts as PyPI.
+# Whoever sets those in the caller's environment already runs code as the caller.
 # Needs /usr/bin/python3 with venv/ensurepip (python3-venv) and access to PyPI. To regenerate
 # a lockfile, run the command in its header inside controlplane/.
-set -euo pipefail
 
+# The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
+# what is removed and what is left as the limit): first the shell functions, through `builtin`,
+# so that a function named set, export, unset, compgen or mapfile cannot keep the others; then a
+# fixed PATH and none of the variables that point Python, pip, uv, git, Perl (dpkg), make or bash
+# at other code.
+builtin mapfile -t _fns < <(builtin compgen -A function)
+builtin unset -f -- "${_fns[@]}"
+builtin unset _fns
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
 for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_*) unset "$v" ;; esac
+    case "$v" in
+        VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
+            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | BASH_ENV | ENV | CDPATH)
+            unset "$v" ;;
+    esac
 done
+set -euo pipefail
 export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -85,8 +98,14 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # 1. uv, verified before it is installed, installed before anything else from a lock.
-if ! "${PY[@]}" "$GATE" only uv "$UVLOCK" --input "$ROOT/controlplane/uv-requirements.in" \
-    || ! "${PY[@]}" "$GATE" pypi "$UVLOCK"; then
+prc=0
+"${PY[@]}" "$GATE" only uv "$UVLOCK" --input "$ROOT/controlplane/uv-requirements.in" \
+    && "${PY[@]}" "$GATE" pypi "$UVLOCK" || prc=$?
+if [ "$prc" = 3 ]; then
+    # (the first question to PyPI: offline, the gate stops here and says so)
+    echo "FAIL PyPI gave no answer (offline?): the lockfiles are NOT verified"
+    exit 1
+elif [ "$prc" != 0 ]; then
     echo "FAIL uv-requirements.lock is not exactly the published uv of uv-requirements.in"
     exit 1
 fi

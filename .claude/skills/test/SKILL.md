@@ -43,7 +43,9 @@ repository is public. Confirm with `crabbox doctor`.
    `.crabbox/captures/*.tar.gz` (logs, timings, ready-made stop command).
 5. **Stop** when done: `crabbox stop --id <slug>`.
 
-`run.sh` prints `N passed, M failed, K skipped` and exits non-zero on any failure.
+`run.sh` prints `N passed, M failed, K skipped` plus every step that was not checked, and
+exits 0 only if every step ran and passed: 1 on a failure, 77 if a step was skipped (a missing
+tool, e2e without `LMNRADIUS_ALLOW_REAL=1`). `LMNRADIUS_ALLOW_SKIP=1` accepts skips on purpose.
 `e2e`/`all` refuse to run without `LMNRADIUS_ALLOW_REAL=1` (a guard so heavy suites
 never fire by accident on the dev box).
 
