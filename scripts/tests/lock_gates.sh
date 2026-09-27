@@ -24,11 +24,14 @@
 #   R1  the gates are not steered by these parts of the caller's environment: an activated
 #       venv (bin/ first on PATH, VIRTUAL_ENV), a .venv in the checkout, PYTHONPATH/PYTHONHOME,
 #       UV_*/PIP_* variables and config files that redirect the index or the interpreter,
-#       exported shell functions named like the builtins and tools the scripts call (set,
-#       export, cd, unset, compgen, mapfile, ., dirname), MAKEFILES/MAKEFLAGS/GNUMAKEFLAGS/
-#       MAKEOVERRIDES, PERL5OPT/PERL5LIB and CDPATH (A3) -- no marker, same verdicts; each of
-#       these parts is shown to run code where nothing removes it; with LOCK_GATES_DEB, also
-#       `make -i deb` and GNUMAKEFLAGS=-i write no .deb past a refused lock;
+#       exported shell functions named like the builtins and tools a script could call (set,
+#       export, ., builtin, exec, exit, shift, cd, unset, compgen, mapfile, dirname),
+#       MAKEFILES/MAKEFLAGS/GNUMAKEFLAGS (with -i)/MAKEOVERRIDES, PERL5OPT/PERL5LIB, CDPATH,
+#       GCONV_PATH, LD_LIBRARY_PATH and TAR_OPTIONS (A3, P3) -- no marker, same verdicts; each of
+#       these parts is shown to run code where nothing removes it, and the clean-environment
+#       block run under all of it holds only its allowlist (P1); with LOCK_GATES_DEB, also
+#       `make -i deb`, GNUMAKEFLAGS=-i and SHELLOPTS=noexec write no .deb past a refused lock;
+#   T2  build-venv.sh refuses a venv path it must not remove, before anything runs;
 #   R2  the lock-related steps of ci.yml and release.yml (extracted word for word by
 #       scripts/tests/ci_step.py) stop at the gate with a planted package, before anything is
 #       installed; the counter-probe without the gate step installs it and the marker appears.
