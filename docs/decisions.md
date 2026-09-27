@@ -289,23 +289,29 @@ genau das `uv==` aus `uv-requirements.in` mit von PyPI veröffentlichten Hashes 
 erst dann installiert es dieses uv in ein eigenes, isoliertes venv und ruft es per absolutem
 Pfad auf; uv löst `pyproject.toml`/`build-requirements.in` neu auf, die Pins müssen genau
 diese Hülle sein, und jeder Hash muss von PyPI für genau diese Fassung stammen. Aus der
-Umgebung des Aufrufers nehmen die Tore, der Bau (`build-venv.sh`, `make-deb.sh`) und die
-Test-Gerüste weder Programme noch Paketquellen; sie beginnen mit demselben Block (vor jedem
-anderen Befehl): alle Shell-Funktionen des Aufrufers entfernt, per `builtin` (Funktionen namens
-`set`, `export`, `unset`, `compgen` oder `mapfile` halten die anderen nicht), fester PATH ohne
-venv-`bin/`, genau `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHON*`, `UV_*`, `PIP_*` (auch
-`PIP_REQUIREMENT`/`PIP_CONSTRAINT`), `GIT_*`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`, `PERL5DB`,
-`MAKEFILES`, `MAKEFLAGS`, `GNUMAKEFLAGS`, `MAKEOVERRIDES`, `BASH_ENV`, `ENV` und `CDPATH`
-entfernt (die make-Läufe von `debian/rules` und die Perl-Programme von dpkg/debhelper sehen
-nichts davon: `make -i deb` baut nicht an einem roten Tor vorbei, `make deb DEST=…` verlegt das
-venv nicht),
-keine pip-/uv-Konfigurationsdateien, `/usr/bin/python3 -I`, uv mit `--python /usr/bin/python3
---no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:** nicht neutralisiert
-ist, was bash vor der ersten Skriptzeile tut (`BASH_ENV`, `SHELLOPTS`/`BASHOPTS`), eine Funktion
-namens `builtin`, das eigene `make` des Aufrufers von `make deb`, die Konfiguration von
-dpkg-buildpackage und `DEB_*`/`DH_*`, `LD_PRELOAD` sowie Proxy-/CA-Variablen (`HTTPS_PROXY`,
-`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, …), die bestimmen, wem das Tor als PyPI vertraut; wer die
-Umgebung des Aufrufers so setzt, führt ohnehin Code als dieser aus. Ein
+Umgebung des Aufrufers nehmen die Tore, der Bau (`build-venv.sh`, `make-deb.sh`), `run.sh` und
+die Test-Gerüste nur eine **Positivliste**: jedes dieser Skripte startet sich zuerst (derselbe
+Block, vor jedem anderen Befehl) unter `env -i` über `/bin/bash -p` neu (keine Funktionen, kein
+`BASH_ENV`/`ENV`/`SHELLOPTS`/`BASHOPTS`), mit festem `PATH=/usr/sbin:/usr/bin:/sbin:/bin`,
+`LANG`/`LC_ALL=C.UTF-8` und, wenn gesetzt, `HOME`, `TMPDIR`, den Proxy-Variablen (`http_proxy`,
+`https_proxy`, `no_proxy` in beiden Schreibweisen), den CA-Variablen (`SSL_CERT_FILE`,
+`SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`) und den Schaltern, mit denen die Skripte des
+Repos untereinander reden (`LMNRADIUS_ALLOW_REAL`, `LMNRADIUS_ALLOW_SKIP`,
+`LMNRADIUS_CALLER_PATH`, `LOCK_GATES_DEB`, `LOCK_GATES_VERBOSE`). Alles andere fällt weg, ohne
+Aufzählung (venvs, `PYTHON*`, `UV_*`, `PIP_*`, git, Perl, make — `make -i deb` baut nicht an
+einem roten Tor vorbei, `make deb DEST=…` verlegt das venv nicht —, `TAR_OPTIONS`, `GCONV_PATH`,
+`LD_LIBRARY_PATH`, jede Funktion). Bis zum Neustart laufen nur Schlüsselwörter, Zuweisungen und
+`exec /usr/bin/env`, mit `POSIXLY_CORRECT`, damit das Spezial-Builtin `exec` vor jeder Funktion
+kommt. Dazu keine pip-/uv-Konfigurationsdateien, `/usr/bin/python3 -I`, uv mit `--python
+/usr/bin/python3 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:** nur,
+was vor dem Neustart läuft — die Shell des Aufrufers mit ihrem `BASH_ENV` und `SHELLOPTS`
+(`noexec`: ein direkt gestartetes Skript tut nichts und endet mit 0, ohne Urteilszeile; das
+Makefile und `run.sh` starten ihre Skripte deshalb mit `/bin/bash -p`), `LD_PRELOAD` für diese
+Shell und `/usr/bin/env`, das eigene `make` des Aufrufers von `make deb` —, und was die
+Positivliste bewusst durchlässt: Dateien unter `HOME` (Konfiguration von git und
+dpkg-buildpackage, pip-/uv-Caches; jede installierte Datei ist hash-geprüft) und die
+Proxy-/CA-Variablen, die bestimmen, wem das Tor als PyPI vertraut; wer das setzt, führt ohnehin
+Code als der Aufrufer aus. Ein
 zusätzlicher Pin mit echten Hashes wird so abgewiesen, bevor sein Code läuft (nachgewiesen:
 die K1-, R1- und R2-Fälle in `scripts/tests/lock_gates.sh`, die Marker entstehen nie; die
 Gegenproben ohne Tor erzeugen sie).

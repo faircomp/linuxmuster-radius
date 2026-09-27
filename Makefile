@@ -23,10 +23,14 @@
 #     ghcr.io/linuxmuster/lmndev-runner:24.04@sha256:6b0c8ac994cf1d2da44b0b36ebd7b3b125094886e78293e04b9db5e515b8209e \
 #     bash -c 'apt-get update -qq && apt-get build-dep -y -qq . && runuser -u build -- make deb'
 # git's ownership guard stays on: the checkout must belong to uid 1000 (the image's `build`).
+# make-deb.sh starts itself again under `env -i` with an allowlist (CLAUDE.md, "Python
+# dependencies"); -p keeps the caller's SHELLOPTS (noexec would make bash run nothing and end 0),
+# BASH_ENV and exported functions from the one bash that does that. This make itself reads the
+# caller's MAKEFLAGS and MAKEFILES (the stated limit); none of them reaches debian/rules.
 .PHONY: deb clean
 
 deb:
-	/bin/bash packaging/make-deb.sh
+	/bin/bash -p packaging/make-deb.sh
 
 clean:
 	debian/rules clean

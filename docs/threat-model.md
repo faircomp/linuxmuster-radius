@@ -75,11 +75,12 @@ SPDX-License-Identifier: GPL-3.0-or-later
   und `lock-gates-build` und lokal in `run.sh` (bricht nach rotem Tor ab); die Gegenproben der
   Lock-Tests installieren nur Fixture-Sperrdateien. Das eine Tor ist
   `scripts/check-lockfiles.sh`, mit eigenem, isoliertem uv. PATH, aktiviertes venv, `.venv`
-  im Checkout, Shell-Funktionen und die Python-, pip-, uv-, git-, Perl-, make- und
-  bash-Variablen des Aufrufers steuern weder die Tore noch den Bau (genaue Liste: ADR-016);
-  nicht neutralisiert (Grenze) sind, was bash vor der ersten Skriptzeile tut (`BASH_ENV`,
-  `SHELLOPTS`), eine Funktion namens `builtin`, das eigene `make` des Aufrufers und
-  Proxy-/CA-Variablen — wer sie setzt, führt ohnehin Code als der Aufrufer aus.
+  im Checkout, Shell-Funktionen und jede Variable außerhalb einer kleinen Positivliste steuern
+  weder die Tore noch den Bau: die Einstiegsskripte starten sich unter `env -i` über
+  `/bin/bash -p` neu (Liste: ADR-016); nicht neutralisiert (Grenze) ist nur, was davor läuft (die
+  Shell des Aufrufers mit `BASH_ENV`, `SHELLOPTS`, `LD_PRELOAD`, sein eigenes `make`), sowie die
+  bewusst durchgelassenen Proxy-/CA-Variablen und Dateien unter `HOME` — wer sie setzt, führt
+  ohnehin Code als der Aufrufer aus.
   `make deb` baut nur versionierte Dateien, führt nichts aus der `.git`-Konfiguration des
   Checkouts aus (kein fsmonitor, keine Hooks, keine Filter) und verzichtet nicht auf git's
   Eigentümerschutz. `scripts/tests/lock_gates.sh` und `make_deb_checks.sh` halten die Fälle

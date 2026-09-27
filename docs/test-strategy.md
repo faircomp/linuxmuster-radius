@@ -19,8 +19,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
   run.sh mit Exit 77 statt 0, bei einem Fehlschlag mit 1; die Schlusszeile nennt alles, was nicht
   geprüft wurde (übersprungen oder nach rotem Tor nicht gelaufen). Wer Überspringen bewusst
   zulässt, setzt `LMNRADIUS_ALLOW_SKIP=1` (Exit 0, die Schlusszeile nennt die Lücken trotzdem).
-  Vor dem Tor läuft nichts vom Aufrufer: run.sh entfernt zuerst dessen Shell-Funktionen (per
-  `builtin`) und `CDPATH`, `BASH_ENV`, `ENV` und ruft `/usr/bin/dirname` mit absolutem Pfad.
+  Vor dem Tor läuft nichts vom Aufrufer: run.sh startet sich zuerst unter `env -i` mit der
+  Positivliste neu (siehe unten), ruft `/usr/bin/dirname` mit absolutem Pfad und das Tor mit
+  `/bin/bash -p`; erst nach dem Tor bekommen lint, unit und e2e den PATH des Aufrufers zurück.
 - Lock-Tor: `bash scripts/check-lockfiles.sh` — **das** Tor vor allem, was aus einer
   Sperrdatei installiert wird (CI-Fast-Tier und CI-Job `lock-gates-build` als erster Schritt,
   Job `lockfile` in ci.yml und release.yml, `packaging/build-venv.sh`, `run.sh`). Prüft alle drei Sperrdateien: Grammatik,
@@ -28,15 +29,13 @@ SPDX-License-Identifier: GPL-3.0-or-later
   ein isoliertes venv (absoluter Pfad), Pins = Hülle von `pyproject.toml`/
   `build-requirements.in`, jede Prüfsumme von PyPI, jede Fassung hat ein Wheel für CPython
   3.12/glibc 2.39/x86_64. Braucht `/usr/bin/python3` mit venv (python3-venv) und PyPI, kein uv
-  vorab. Unabhängig von der Umgebung des Aufrufers: Tor, `build-venv.sh`, `make-deb.sh` und die
-  beiden Test-Gerüste beginnen mit demselben Block (Liste und Grenzen in CLAUDE.md, "Python
-  dependencies"): Shell-Funktionen per `builtin` entfernt, fester PATH, `VIRTUAL_ENV`,
-  `CONDA_PREFIX`, `PYTHON*`, `UV_*`, `PIP_*`, `GIT_*`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`,
-  `PERL5DB`, `MAKEFILES`, `MAKEFLAGS`, `GNUMAKEFLAGS`, `MAKEOVERRIDES`, `BASH_ENV`, `ENV`,
-  `CDPATH` entfernt;
-  nicht neutralisiert (Grenze): was bash vor der ersten Skriptzeile tut (`BASH_ENV`,
-  `SHELLOPTS`), eine Funktion namens `builtin`, das eigene `make` des Aufrufers von `make deb`,
-  Proxy-/CA-Variablen. Ohne Netz scheitert es nach Sekunden (kurze PyPI-Timeouts, Abbruch beim
+  vorab. Unabhängig von der Umgebung des Aufrufers (P1): Tor, `build-venv.sh`, `make-deb.sh`,
+  `run.sh` und die beiden Test-Gerüste beginnen mit demselben Block und starten sich unter
+  `env -i` über `/bin/bash -p` neu, nur mit der Positivliste aus CLAUDE.md ("Python
+  dependencies"; fester PATH, C.UTF-8, `HOME`, `TMPDIR`, Proxy- und CA-Variablen, die Schalter
+  des Repos); keine Funktion, keine andere Variable. Grenze: nur, was vor dem Neustart läuft (die
+  Shell des Aufrufers mit `BASH_ENV`/`SHELLOPTS`, `LD_PRELOAD`, das eigene `make` des Aufrufers),
+  und die bewusst durchgelassenen Proxy-/CA-Variablen. Ohne Netz scheitert es nach Sekunden (kurze PyPI-Timeouts, Abbruch beim
   ersten unlesbaren Pin) und sagt das ("PyPI gave no answer (offline?)"), statt einen Hash zu
   beschuldigen; ebenso `build-venv.sh`/`make deb`.
   **Grenze:** eine andere echte Fassung (älter oder neuer, echte Hashes), die die deklarierten
@@ -61,16 +60,26 @@ SPDX-License-Identifier: GPL-3.0-or-later
     Tor-Aufruf erzeugt den Marker aus einem `bin/`-Skript. Die Gegenproben (hier und bei R2)
     installieren nur Fixture-Sperrdateien, die allein das Test-Wheel pinnen, nie die
     Sperrdateien des Checkouts (kalte Prüfung r3, F1).
-  - **R1:** unter vergifteter Umgebung (aktiviertes venv mit dem Wheel vorn im PATH, darin auch
-    `dirname`, `VIRTUAL_ENV`, `PYTHONPATH` mit Marker-`sitecustomize`, `PYTHONHOME`,
+  - **R1/P3:** unter vergifteter Umgebung (aktiviertes venv mit dem Wheel vorn im PATH, darin
+    auch `dirname`, `VIRTUAL_ENV`, `PYTHONPATH` mit Marker-`sitecustomize`, `PYTHONHOME`,
     `UV_*`/`PIP_*` samt Konfigurationsdateien, die Paketquelle und Interpreter umlenken, `.venv`
-    im Checkout; A3: exportierte Funktionen `set`, `export`, `cd`, `unset`, `compgen`,
-    `mapfile`, `PERL5OPT`/`PERL5LIB`, `CDPATH`, und für direkt gestartete Skripte `MAKEFILES`,
-    `MAKEFLAGS`, `GNUMAKEFLAGS`) gleiche Urteile und kein Marker: `check-lockfiles.sh`,
-    `build-venv.sh`, `run.sh gate`/`lint`, mit `LOCK_GATES_DEB=1` auch `make deb` und
-    `make-deb.sh` direkt. Jeder neue Teil des Gifts ist nachweislich scharf (Gegenproben: eine
-    bash, die die Funktionen behält, `make`, `dpkg-parsechangelog`, `dirname` aus dem PATH, ein
-    relatives `cd` unter `CDPATH` führen den Code aus bzw. landen woanders).
+    im Checkout; exportierte Funktionen `set`, `export`, `.`, `builtin`, `exec`, `exit`, `shift`,
+    `cd`, `unset`, `compgen`, `mapfile`, `dirname`; `PERL5OPT`/`PERL5LIB`, `CDPATH`,
+    `GCONV_PATH` mit einem gconv-Modul und `LD_LIBRARY_PATH` mit einer `libz.so.1`, beide
+    markerschreibend (mit gcc gebaut), `TAR_OPTIONS` mit Checkpoint-Aktion; für direkt
+    gestartete Skripte `MAKEFILES`, `MAKEFLAGS`/`GNUMAKEFLAGS` mit `-i` und fremder `SHELL`,
+    `MAKEOVERRIDES`) gleiche Urteile und kein Marker: `check-lockfiles.sh`, `build-venv.sh`,
+    `run.sh gate`/`lint`, mit `LOCK_GATES_DEB=1` auch `make deb`, `make-deb.sh` direkt,
+    `make -i deb`, `GNUMAKEFLAGS=-i make deb` und `SHELLOPTS=noexec make deb` (kein .deb). Der
+    Neustart-Block selbst unter demselben Gift sieht nur die Positivliste, keine Funktion, und
+    läuft als `bash -p`. Jeder Teil des Gifts ist nachweislich scharf (Gegenproben: eine bash,
+    die die Funktionen behält, `make`, `dpkg-parsechangelog`, `iconv`, `python3`, `tar`,
+    `dirname` aus dem PATH, ein relatives `cd` unter `CDPATH`). Die Grenze wird gezeigt:
+    `SHELLOPTS=noexec` bei direktem `bash`-Start lässt das Tor nichts tun (Exit 0, keine
+    Urteilszeile).
+  - **T2:** `build-venv.sh` weist einen venv-Pfad ab, der nicht absolut ist, Leerraum oder
+    `.`/`..`/`//` enthält oder nicht auf `/opt/linuxmuster-radius/venv` endet, bevor irgendetwas
+    läuft; das benannte Verzeichnis bleibt.
   - **R2:** die Lock-Schritte von ci.yml (`fast`, `lockfile`) und release.yml (`lockfile`),
     per `scripts/tests/ci_step.py` wörtlich ausgelesen und wie in Actions nachgefahren, bleiben
     mit einem gepflanzten Paket in jeder Sperrdatei am Tor stehen; nichts wird installiert, kein
@@ -84,13 +93,18 @@ SPDX-License-Identifier: GPL-3.0-or-later
   Build-Image): ein vollständiger Bau eines schmutzigen git-Checkouts (geänderte, gelöschte,
   gestagte, nicht hinzugefügte Datei, Modus 0600 und umask 002, versionierter Symlink,
   ignorierte Geheimnisse) unter der vergifteten Umgebung und mit fsmonitor, Filter und Hooks in
-  `.git` und mit `MAKEFILES`/`MAKEFLAGS`/`GNUMAKEFLAGS`, `PERL5OPT`/`PERL5LIB` und `CDPATH`,
-  die in jedem make-Lauf von `debian/rules` bzw. jedem Perl-Programm den Marker schreiben würden:
+  `.git` und mit `MAKEFILES`/`MAKEFLAGS`/`GNUMAKEFLAGS`, `PERL5OPT`/`PERL5LIB`, `CDPATH`,
+  `TAR_OPTIONS`, `SHELLOPTS=noexec` und Funktionen, die in jedem make-Lauf von `debian/rules`
+  bzw. jedem Perl-Programm oder tar den Marker schreiben würden, als `make deb DEST=…`:
   baut, warnt vor und nach dem Bau über jede Abweichung von HEAD (und dass die Version
   die des Changelogs bleibt), packt genau die versionierten Dateien mit 0644/0755 und den
   Symlink, führt nichts aus `.git` oder der Umgebung aus. Ein Worktree ohne erreichbares
   Repository bricht ab, ohne etwas zu packen; `make_deb_checks.sh guard build` als root: ein
   Checkout eines anderen Nutzers wird von git's Eigentümerschutz abgewiesen, nichts läuft.
+  **T1:** mit einem `TMPDIR`, der ein Leerzeichen enthält (der Bau läuft in einem Verzeichnis
+  darunter), bricht `debian/rules` ab, bevor etwas läuft; ein Verzeichnis, das wie der Teil vor
+  dem Leerzeichen heißt, bleibt (mit den alten, ungequoteten Pfaden in `debian/rules` löschte
+  `build-venv.sh` es per `rm -rf`).
 
 ## Heavy-Tier (crabbox, Docker)
 

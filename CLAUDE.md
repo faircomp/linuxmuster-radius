@@ -81,27 +81,33 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   all three locks — grammar, every hash on PyPI, pin set == closure of the declared inputs
   (uv re-resolves `pyproject.toml`/`build-requirements.in`) — and installs the uv it needs
   itself, from the verified uv lock into an isolated venv, called by absolute path.
-  **The caller's environment:** `scripts/check-lockfiles.sh`, `packaging/build-venv.sh`,
-  `packaging/make-deb.sh`, `scripts/tests/lock_gates.sh` and `scripts/tests/make_deb_checks.sh`
-  start with one and the same block (`test_packaging.py` keeps them equal), before any other
-  command: it removes every shell function of the caller, through `builtin` (so functions named
-  `set`, `export`, `unset`, `compgen` or `mapfile` cannot keep the others), sets PATH to
-  `/usr/sbin:/usr/bin:/sbin:/bin` and drops exactly `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHON*`,
-  `UV_*`, `PIP_*`, `GIT_*`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`, `PERL5DB`, `MAKEFILES`,
-  `MAKEFLAGS`, `GNUMAKEFLAGS`, `MAKEOVERRIDES`, `BASH_ENV`, `ENV` and `CDPATH`; the gates also
-  read no pip/uv config file and run `/usr/bin/python3 -I`. So neither an activated venv nor a
-  `.venv` in the checkout, a function, nor a Perl (dpkg, debhelper) or make setting of the
-  caller takes part: the make runs of `debian/rules` never see the caller's make flags
-  (`make -i deb` cannot build past a failed gate) or command-line variables (`make deb
-  DEST=...` cannot move the venv).
-  `scripts/tests/run.sh` removes the functions and `CDPATH`, `BASH_ENV`, `ENV` first and calls
-  `/usr/bin/dirname` before its gate (after the gate, lint and unit use the caller's tools on
-  purpose). Not neutralized, a stated limit: what bash does before a script's first line
-  (`BASH_ENV`, `SHELLOPTS`/`BASHOPTS`), a function named `builtin`, the caller's own `make` of
-  `make deb` (it reads `MAKEFILES`/`MAKEFLAGS` itself), dpkg-buildpackage's configuration files
-  and `DEB_*`/`DH_*` settings, `LD_PRELOAD`, and proxy/CA variables (`HTTPS_PROXY`,
-  `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, …) — whoever sets those already runs code as the
-  caller, or decides whom the gate trusts as PyPI.
+  **The caller's environment (P1, an allowlist):** `scripts/check-lockfiles.sh`,
+  `packaging/build-venv.sh`, `packaging/make-deb.sh`, `scripts/tests/run.sh`,
+  `scripts/tests/lock_gates.sh` and `scripts/tests/make_deb_checks.sh` start with one and the same
+  block (`test_packaging.py` keeps it equal and first): unless it is the clean run already, the
+  script starts itself again under `env -i` through `/bin/bash -p` (which imports no function and
+  reads no `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`) with exactly this environment:
+  `PATH=/usr/sbin:/usr/bin:/sbin:/bin`, `LANG`/`LC_ALL=C.UTF-8`, and where set `HOME`, `TMPDIR`,
+  the proxy variables (`http_proxy`, `https_proxy`, `no_proxy` and the upper-case three), the CA
+  variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`) and the switches
+  the repository's scripts pass each other (`LMNRADIUS_ALLOW_REAL`, `LMNRADIUS_ALLOW_SKIP`,
+  `LMNRADIUS_CALLER_PATH`, `LOCK_GATES_DEB`, `LOCK_GATES_VERBOSE`). Everything else is gone
+  without a list: venvs, `PYTHON*`, `UV_*`, `PIP_*`, `GIT_*`, Perl, make (`make -i deb` cannot
+  build past a failed gate, `make deb DEST=...` cannot move the venv), `TAR_OPTIONS`,
+  `GCONV_PATH`, `LD_LIBRARY_PATH`, `CDPATH`, and every function (`builtin`, `exec` included). Up
+  to the restart only keywords, assignments and `exec /usr/bin/env` run, with `POSIXLY_CORRECT`
+  set so that the special builtin `exec` comes before any function. The gates also read no
+  pip/uv config file and run `/usr/bin/python3 -I`. The Makefile starts `make-deb.sh`, and
+  `run.sh` its gate, with `/bin/bash -p`. `run.sh` keeps the caller's PATH aside
+  (`LMNRADIUS_CALLER_PATH`) and gives it back only after the gate passed: lint, unit and e2e use
+  the caller's tools on purpose. **Limit:** only what runs before the restart: the caller's shell
+  with its `BASH_ENV` and `SHELLOPTS` (`noexec` makes a directly started script do nothing and
+  end 0 — no verdict line, no summary line), `LD_PRELOAD` for that shell and `/usr/bin/env`, the
+  caller's own `make` of `make deb` (it reads `MAKEFLAGS`/`MAKEFILES` itself), and passing the
+  restart marker `--lmnradius-clean-env` as first argument by hand; plus what the allowlist
+  passes on purpose: files under `HOME` (git's and dpkg-buildpackage's configuration, pip/uv
+  caches: every installed file is hash-checked) and the proxy/CA variables, which decide whom
+  the gate trusts as PyPI. Whoever sets those already runs code as the caller.
   Limit: pins are compared with the closure by name; another real release of a pinned
   package (older or newer, a week old, genuine hashes) that satisfies the declared
   requirements passes every gate — only the review of the lockfile diff catches it.

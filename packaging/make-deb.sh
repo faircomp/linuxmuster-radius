@@ -29,30 +29,44 @@
 # build: packing the tree as it is would pack everything in it. Only without any .git (an
 # unpacked source package) is the tree built in place.
 
-# Which programs run is not left to the caller (R1, A3). dpkg-buildpackage, dpkg-parsechangelog
-# and debhelper are Perl, and the make runs of debian/rules read MAKEFILES, MAKEFLAGS,
-# GNUMAKEFLAGS and (in dh's recursive calls of debian/rules) MAKEOVERRIDES from the environment:
-# none of the caller's reach them. So neither make flags (`make -i deb`: a failed gate would be
-# ignored and a .deb written anyway) nor variables set on the command line (`make deb DEST=...`:
-# the venv would be built for another path) get into debian/rules. The caller's own `make` of
-# `make deb` has read them before this script starts (a stated limit, see CLAUDE.md).
-# The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
-# what is removed and what is left as the limit): first the shell functions, through `builtin`,
-# so that a function named set, export, unset, compgen or mapfile cannot keep the others; then a
-# fixed PATH and none of the variables that point Python, pip, uv, git, Perl (dpkg), make or bash
-# at other code.
-builtin mapfile -t _fns < <(builtin compgen -A function)
-builtin unset -f -- "${_fns[@]}"
-builtin unset _fns
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-for v in $(compgen -e); do
-    case "$v" in
-        VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
-            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | MAKEOVERRIDES \
-            | BASH_ENV | ENV | CDPATH)
-            unset "$v" ;;
-    esac
-done
+# Which programs run is not left to the caller (R1, A3, P1): the block below starts this script
+# again under `env -i` with an allowlist, so no variable or function of the caller reaches git,
+# tar, dpkg-buildpackage, dpkg-parsechangelog and debhelper (Perl) or the make runs of
+# debian/rules. So neither make flags (`make -i deb`: a failed gate would be ignored and a .deb
+# written anyway) nor variables set on make's command line (`make deb DEST=...`: the venv would be
+# built for another path), TAR_OPTIONS, PERL5OPT, GCONV_PATH or LD_LIBRARY_PATH get in. The
+# Makefile starts this script with /bin/bash -p, so the caller's SHELLOPTS (noexec) and BASH_ENV
+# do not apply to it either. The caller's own `make` of `make deb` has read MAKEFLAGS and
+# MAKEFILES before this script starts (a stated limit, see CLAUDE.md).
+# ---- clean environment (P1): the same block in every entry script (test_packaging.py) ----
+# Unless this is the clean run already, start again under `env -i` with exactly this allowlist,
+# through /bin/bash -p, which imports no function and reads no BASH_ENV, ENV, SHELLOPTS or
+# BASHOPTS: PATH=/usr/sbin:/usr/bin:/sbin:/bin, LANG and LC_ALL C.UTF-8, and, where set, HOME,
+# TMPDIR, http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE,
+# SSL_CERT_DIR, REQUESTS_CA_BUNDLE, PIP_CERT, and the switches the repository's scripts pass
+# each other: LMNRADIUS_ALLOW_REAL, LMNRADIUS_ALLOW_SKIP, LMNRADIUS_CALLER_PATH (run.sh),
+# LOCK_GATES_DEB, LOCK_GATES_VERBOSE (lock_gates.sh). Every other variable and every function of
+# the caller is gone. Up to the exec only keywords, assignments and one command by absolute path
+# run: POSIXLY_CORRECT puts bash into POSIX mode, where the special builtin `exec` comes before
+# any function the caller exported. The clean run is told by its first argument.
+if [[ "${1-}" != --lmnradius-clean-env ]]; then
+    POSIXLY_CORRECT=1
+    exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+        ${HOME+"HOME=$HOME"} ${TMPDIR+"TMPDIR=$TMPDIR"} \
+        ${http_proxy+"http_proxy=$http_proxy"} ${https_proxy+"https_proxy=$https_proxy"} \
+        ${no_proxy+"no_proxy=$no_proxy"} ${HTTP_PROXY+"HTTP_PROXY=$HTTP_PROXY"} \
+        ${HTTPS_PROXY+"HTTPS_PROXY=$HTTPS_PROXY"} ${NO_PROXY+"NO_PROXY=$NO_PROXY"} \
+        ${SSL_CERT_FILE+"SSL_CERT_FILE=$SSL_CERT_FILE"} ${SSL_CERT_DIR+"SSL_CERT_DIR=$SSL_CERT_DIR"} \
+        ${REQUESTS_CA_BUNDLE+"REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"} ${PIP_CERT+"PIP_CERT=$PIP_CERT"} \
+        ${LMNRADIUS_ALLOW_REAL+"LMNRADIUS_ALLOW_REAL=$LMNRADIUS_ALLOW_REAL"} \
+        ${LMNRADIUS_ALLOW_SKIP+"LMNRADIUS_ALLOW_SKIP=$LMNRADIUS_ALLOW_SKIP"} \
+        ${LMNRADIUS_CALLER_PATH+"LMNRADIUS_CALLER_PATH=$LMNRADIUS_CALLER_PATH"} \
+        ${LOCK_GATES_DEB+"LOCK_GATES_DEB=$LOCK_GATES_DEB"} \
+        ${LOCK_GATES_VERBOSE+"LOCK_GATES_VERBOSE=$LOCK_GATES_VERBOSE"} \
+        /bin/bash -p "$0" --lmnradius-clean-env "$@"
+fi
+shift
+# ---- end of the clean environment block ----
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"

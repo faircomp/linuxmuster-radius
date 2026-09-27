@@ -150,7 +150,8 @@ def test_make_deb_never_waives_the_git_ownership_guard_wholesale() -> None:
             assert line.strip() == 'git config --global --add safe.directory "$GITHUB_WORKSPACE"'
 
 
-# The scripts a caller or the build starts: they clean their environment with one block (A3).
+# The scripts a caller or the build starts: each starts itself again in a clean environment,
+# with one and the same block, before any other command (P1).
 ENV_SCRIPTS = (
     "scripts/check-lockfiles.sh",
     "packaging/build-venv.sh",
@@ -158,7 +159,26 @@ ENV_SCRIPTS = (
     "scripts/tests/lock_gates.sh",
     "scripts/tests/make_deb_checks.sh",
 )
-FUNCTIONS_FIRST = "builtin mapfile -t _fns < <(builtin compgen -A function)"
+BLOCK_FIRST = 'if [[ "${1-}" != --lmnradius-clean-env ]]; then'
+ALLOWLIST = {
+    "HOME",
+    "TMPDIR",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "PIP_CERT",
+    "LMNRADIUS_ALLOW_REAL",
+    "LMNRADIUS_ALLOW_SKIP",
+    "LMNRADIUS_CALLER_PATH",
+    "LOCK_GATES_DEB",
+    "LOCK_GATES_VERBOSE",
+}
 
 
 def _code(path: str) -> list[str]:
@@ -167,47 +187,75 @@ def _code(path: str) -> list[str]:
     return [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
 
 
-def test_entry_scripts_clean_the_callers_environment_first_with_one_block() -> None:
+def _block(code: list[str], path: str) -> tuple[list[str], int]:
+    start = code.index(BLOCK_FIRST)
+    end = code.index("shift", start)
+    return code[start : end + 1], end + 1
+
+
+def test_entry_scripts_start_again_in_a_clean_environment_first() -> None:
     blocks = {}
     for path in ENV_SCRIPTS:
         code = _code(path)
         # before anything else, even `set`: a function of the caller may be named set
-        assert code[0] == FUNCTIONS_FIRST, f"{path}: the first command must remove the functions"
-        end = code.index("done")
-        assert code[end + 1].startswith("set -"), f"{path}: `set` comes right after the block"
-        blocks[path] = code[: end + 1]
+        assert code[0] == BLOCK_FIRST, f"{path}: the first command must be the clean-env block"
+        blocks[path], after = _block(code, path)
+        assert code[after].startswith("set -"), f"{path}: `set` comes right after the block"
     first = blocks[ENV_SCRIPTS[0]]
     for path, block in blocks.items():
-        assert block == first, f"{path}: its environment block differs from {ENV_SCRIPTS[0]}'s"
-    assert first[1] == 'builtin unset -f -- "${_fns[@]}"'
+        assert block == first, f"{path}: its clean-env block differs from {ENV_SCRIPTS[0]}'s"
     text = "\n".join(first)
-    for name in (
-        "VIRTUAL_ENV",
-        "CONDA_PREFIX",
-        "PYTHON*",
-        "UV_*",
-        "PIP_*",
-        "GIT_*",
-        "PERL5OPT",
-        "PERL5LIB",
-        "PERLLIB",
-        "PERL5DB",
-        "MAKEFILES",
-        "MAKEFLAGS",
-        "GNUMAKEFLAGS",
-        "MAKEOVERRIDES",
-        "BASH_ENV",
-        "ENV",
-        "CDPATH",
-    ):
-        assert re.search(rf"(^|[\s|]){re.escape(name)}(\s|$|\))", text), name
+    # up to the exec: an assignment that makes `exec` win over functions, one absolute command
+    assert first[1].strip() == "POSIXLY_CORRECT=1"
+    assert first[2].strip().startswith("exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin ")
+    assert "LANG=C.UTF-8 LC_ALL=C.UTF-8" in first[2]
+    assert '/bin/bash -p "$0" --lmnradius-clean-env "$@"' in text
+    passed = set(re.findall(r'\$\{(\w+)\+"\1=\$\1"\}', text))
+    assert passed == ALLOWLIST, sorted(passed ^ ALLOWLIST)
+    # nothing else is passed on: every word of the exec is a fixed assignment or one of those
+    words = re.findall(r"\S+", " ".join(first[2:-2]).replace("\\", " "))
+    for w in words:
+        assert (
+            w in ("exec", "/usr/bin/env", "-i", "/bin/bash", "-p", '"$0"', '"$@"')
+            or w == "--lmnradius-clean-env"
+            or re.fullmatch(r'\$\{(\w+)\+"\1=\$\1"\}', w)
+            or w in ("PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8")
+        ), w
 
 
-def test_run_sh_calls_nothing_from_the_callers_path_before_its_gate() -> None:
+def test_run_sh_restarts_clean_and_calls_nothing_from_the_callers_path_before_its_gate() -> None:
     code = _code("scripts/tests/run.sh")
-    assert code[0] == FUNCTIONS_FIRST
-    assert code[1] == 'builtin unset -f -- "${_fns[@]}"'
+    assert code[0] == 'LMNRADIUS_CALLER_PATH="${LMNRADIUS_CALLER_PATH-$PATH}"'
+    block, after = _block(code, "scripts/tests/run.sh")
+    assert code[1] == BLOCK_FIRST
+    assert block == _block(_code(ENV_SCRIPTS[0]), ENV_SCRIPTS[0])[0]
+    assert code[after : after + 3] == [
+        'CALLER_PATH="$LMNRADIUS_CALLER_PATH"',
+        "unset LMNRADIUS_CALLER_PATH",
+        "set -uo pipefail",
+    ]
     before_gate = code[: next(i for i, ln in enumerate(code) if ln.startswith("summary()"))]
     assert any("/usr/bin/dirname" in ln for ln in before_gate)
     for ln in before_gate:
         assert not re.search(r"(?<![/\w-])dirname\b", ln), ln
+    assert any(ln.strip().startswith("if /bin/bash -p scripts/check-lockfiles.sh") for ln in code)
+
+
+def test_make_deb_starts_make_deb_sh_with_bash_p() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "\n\t/bin/bash -p packaging/make-deb.sh\n" in makefile
+
+
+def test_rules_refuse_a_build_directory_with_whitespace_and_quote_the_paths() -> None:
+    rules = (ROOT / "debian" / "rules").read_text(encoding="utf-8")
+    assert "ifneq ($(words $(CURDIR)),1)" in rules
+    assert '\tbash packaging/build-venv.sh "$(ROOT)$(DEST)"\n' in rules
+    assert '\tdebian/venv-relocate "$(ROOT)" "$(DEST)"\n' in rules
+    assert '\tdebian/venv-relocate --verify "$(ROOT)" "$(DEST)"\n' in rules
+
+
+def test_build_venv_refuses_a_bad_venv_path_before_any_rm() -> None:
+    code = _code("packaging/build-venv.sh")
+    guard = next(i for i, ln in enumerate(code) if "refusing venv path with whitespace" in ln)
+    first_rm = next(i for i, ln in enumerate(code) if "rm -rf" in ln)
+    assert guard < first_rm

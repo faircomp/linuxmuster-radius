@@ -9,35 +9,59 @@
 # of debian/changelog (controlplane/setup.py reads it).
 
 # debian/rules calls this script with a bare `bash`, and dpkg-buildpackage may be started by hand,
-# so it cleans its environment itself (R1, A3), and reads no pip configuration file.
-# The caller's environment, before any other command (CLAUDE.md, "Python dependencies", names
-# what is removed and what is left as the limit): first the shell functions, through `builtin`,
-# so that a function named set, export, unset, compgen or mapfile cannot keep the others; then a
-# fixed PATH and none of the variables that point Python, pip, uv, git, Perl (dpkg), make or bash
-# at other code.
-builtin mapfile -t _fns < <(builtin compgen -A function)
-builtin unset -f -- "${_fns[@]}"
-builtin unset _fns
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-for v in $(compgen -e); do
-    case "$v" in
-        VIRTUAL_ENV | CONDA_PREFIX | PYTHON* | UV_* | PIP_* | GIT_* | PERL5OPT | PERL5LIB \
-            | PERLLIB | PERL5DB | MAKEFILES | MAKEFLAGS | GNUMAKEFLAGS | MAKEOVERRIDES \
-            | BASH_ENV | ENV | CDPATH)
-            unset "$v" ;;
-    esac
-done
+# so it starts itself again in a clean environment (R1, A3, P1: the block below), and reads no pip
+# configuration file.
+# ---- clean environment (P1): the same block in every entry script (test_packaging.py) ----
+# Unless this is the clean run already, start again under `env -i` with exactly this allowlist,
+# through /bin/bash -p, which imports no function and reads no BASH_ENV, ENV, SHELLOPTS or
+# BASHOPTS: PATH=/usr/sbin:/usr/bin:/sbin:/bin, LANG and LC_ALL C.UTF-8, and, where set, HOME,
+# TMPDIR, http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE,
+# SSL_CERT_DIR, REQUESTS_CA_BUNDLE, PIP_CERT, and the switches the repository's scripts pass
+# each other: LMNRADIUS_ALLOW_REAL, LMNRADIUS_ALLOW_SKIP, LMNRADIUS_CALLER_PATH (run.sh),
+# LOCK_GATES_DEB, LOCK_GATES_VERBOSE (lock_gates.sh). Every other variable and every function of
+# the caller is gone. Up to the exec only keywords, assignments and one command by absolute path
+# run: POSIXLY_CORRECT puts bash into POSIX mode, where the special builtin `exec` comes before
+# any function the caller exported. The clean run is told by its first argument.
+if [[ "${1-}" != --lmnradius-clean-env ]]; then
+    POSIXLY_CORRECT=1
+    exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+        ${HOME+"HOME=$HOME"} ${TMPDIR+"TMPDIR=$TMPDIR"} \
+        ${http_proxy+"http_proxy=$http_proxy"} ${https_proxy+"https_proxy=$https_proxy"} \
+        ${no_proxy+"no_proxy=$no_proxy"} ${HTTP_PROXY+"HTTP_PROXY=$HTTP_PROXY"} \
+        ${HTTPS_PROXY+"HTTPS_PROXY=$HTTPS_PROXY"} ${NO_PROXY+"NO_PROXY=$NO_PROXY"} \
+        ${SSL_CERT_FILE+"SSL_CERT_FILE=$SSL_CERT_FILE"} ${SSL_CERT_DIR+"SSL_CERT_DIR=$SSL_CERT_DIR"} \
+        ${REQUESTS_CA_BUNDLE+"REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"} ${PIP_CERT+"PIP_CERT=$PIP_CERT"} \
+        ${LMNRADIUS_ALLOW_REAL+"LMNRADIUS_ALLOW_REAL=$LMNRADIUS_ALLOW_REAL"} \
+        ${LMNRADIUS_ALLOW_SKIP+"LMNRADIUS_ALLOW_SKIP=$LMNRADIUS_ALLOW_SKIP"} \
+        ${LMNRADIUS_CALLER_PATH+"LMNRADIUS_CALLER_PATH=$LMNRADIUS_CALLER_PATH"} \
+        ${LOCK_GATES_DEB+"LOCK_GATES_DEB=$LOCK_GATES_DEB"} \
+        ${LOCK_GATES_VERBOSE+"LOCK_GATES_VERBOSE=$LOCK_GATES_VERBOSE"} \
+        /bin/bash -p "$0" --lmnradius-clean-env "$@"
+fi
+shift
+# ---- end of the clean environment block ----
 set -euo pipefail
 export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1
 
+die() { echo "build-venv.sh: $*" >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 VENV="${1:?usage: build-venv.sh <venv directory>}"
+# The venv path is removed with `rm -rf` further down. Refuse, before anything else, a path that
+# could name something else: only an absolute path without whitespace and without . or ..
+# components, ending in /opt/linuxmuster-radius/venv -- debian/rules passes
+# <build dir>/debian/linuxmuster-radius/opt/linuxmuster-radius/venv. (A build directory with a
+# space once split that path, and the `rm -rf` hit a directory outside the build; T2.)
+case "$VENV" in
+    *[[:space:]]*) die "refusing venv path with whitespace: '$VENV'" ;;
+    */./* | */../* | */. | */.. | *//*) die "refusing venv path with . or .. or //: '$VENV'" ;;
+    /*/opt/linuxmuster-radius/venv | /opt/linuxmuster-radius/venv) ;;
+    *) die "refusing venv path '$VENV': it must be absolute and end in /opt/linuxmuster-radius/venv" ;;
+esac
 GATE="$ROOT/scripts/lockfile_gate.py"
 CP="$ROOT/controlplane"
 LOCKS=("$CP/build-requirements.lock" "$CP/requirements.lock")
 WHEELS="$(mktemp -d)"
 trap 'rm -rf "$WHEELS"' EXIT
-die() { echo "build-venv.sh: $*" >&2; exit 1; }
 # The system interpreter, isolated (-I: no PYTHON* variables, no user site, neither the script's
 # directory nor the working directory on sys.path) -- never one from a venv this script
 # populates from a lockfile.

@@ -13,20 +13,50 @@
 #
 # The lock gate (scripts/check-lockfiles.sh) runs FIRST in every mode but e2e, before anything
 # that could run a package from a lockfile (mypy plugins, pytest, a venv's tools, the lock
-# regression test), started as /bin/bash; the gate cleans its own environment (functions, PATH,
-# VIRTUAL_ENV, PYTHON*, UV_*, PIP_*, ...; CLAUDE.md, "Python dependencies"), so neither an
-# activated venv nor the checkout's .venv takes part in it (K1/R1). If it fails, run.sh stops
-# right there: nothing else runs, and the last line says what did not run. Before the gate
-# nothing of the caller's runs here either (A3/A4): the caller's shell functions are removed
-# first, through `builtin` (a function named set, cd, unset, compgen or mapfile cannot keep the
-# others; one named `builtin` can, the stated limit), then CDPATH, BASH_ENV and ENV, and dirname
-# is called by its absolute path. Only after the gate passed are the control-plane tools of
-# .venv (created by crabbox_bootstrap) put first on PATH for lint and unit, which use the
-# caller's tools on purpose; the lock regression test (`locks`) cleans its environment like the
-# gate.
-builtin mapfile -t _fns < <(builtin compgen -A function)
-builtin unset -f -- "${_fns[@]}"
-builtin unset _fns CDPATH BASH_ENV ENV
+# regression test), started as /bin/bash -p. run.sh itself, the gate and the lock regression
+# test start again in a clean environment first (the block below: an allowlist under env -i,
+# nothing else of the caller's, no function; CLAUDE.md, "Python dependencies"), so neither an
+# activated venv nor the checkout's .venv takes part in the gate (K1/R1/P1). If it fails, run.sh
+# stops right there: nothing else runs, and the last line says what did not run. Only after the
+# gate passed do lint, unit and e2e get the caller's PATH back (kept aside as
+# LMNRADIUS_CALLER_PATH), with the control-plane tools of .venv (created by crabbox_bootstrap)
+# first: they use the caller's tools on purpose. What the caller's shell does before the restart
+# is the caller's (the limit in CLAUDE.md): with SHELLOPTS=noexec it runs nothing and ends 0
+# without the summary line -- a run without that line has checked nothing.
+# The caller's PATH, kept aside for the steps after the gate (lint, unit, e2e use the caller's
+# tools on purpose); nothing before the gate uses it.
+LMNRADIUS_CALLER_PATH="${LMNRADIUS_CALLER_PATH-$PATH}"
+# ---- clean environment (P1): the same block in every entry script (test_packaging.py) ----
+# Unless this is the clean run already, start again under `env -i` with exactly this allowlist,
+# through /bin/bash -p, which imports no function and reads no BASH_ENV, ENV, SHELLOPTS or
+# BASHOPTS: PATH=/usr/sbin:/usr/bin:/sbin:/bin, LANG and LC_ALL C.UTF-8, and, where set, HOME,
+# TMPDIR, http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE,
+# SSL_CERT_DIR, REQUESTS_CA_BUNDLE, PIP_CERT, and the switches the repository's scripts pass
+# each other: LMNRADIUS_ALLOW_REAL, LMNRADIUS_ALLOW_SKIP, LMNRADIUS_CALLER_PATH (run.sh),
+# LOCK_GATES_DEB, LOCK_GATES_VERBOSE (lock_gates.sh). Every other variable and every function of
+# the caller is gone. Up to the exec only keywords, assignments and one command by absolute path
+# run: POSIXLY_CORRECT puts bash into POSIX mode, where the special builtin `exec` comes before
+# any function the caller exported. The clean run is told by its first argument.
+if [[ "${1-}" != --lmnradius-clean-env ]]; then
+    POSIXLY_CORRECT=1
+    exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+        ${HOME+"HOME=$HOME"} ${TMPDIR+"TMPDIR=$TMPDIR"} \
+        ${http_proxy+"http_proxy=$http_proxy"} ${https_proxy+"https_proxy=$https_proxy"} \
+        ${no_proxy+"no_proxy=$no_proxy"} ${HTTP_PROXY+"HTTP_PROXY=$HTTP_PROXY"} \
+        ${HTTPS_PROXY+"HTTPS_PROXY=$HTTPS_PROXY"} ${NO_PROXY+"NO_PROXY=$NO_PROXY"} \
+        ${SSL_CERT_FILE+"SSL_CERT_FILE=$SSL_CERT_FILE"} ${SSL_CERT_DIR+"SSL_CERT_DIR=$SSL_CERT_DIR"} \
+        ${REQUESTS_CA_BUNDLE+"REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"} ${PIP_CERT+"PIP_CERT=$PIP_CERT"} \
+        ${LMNRADIUS_ALLOW_REAL+"LMNRADIUS_ALLOW_REAL=$LMNRADIUS_ALLOW_REAL"} \
+        ${LMNRADIUS_ALLOW_SKIP+"LMNRADIUS_ALLOW_SKIP=$LMNRADIUS_ALLOW_SKIP"} \
+        ${LMNRADIUS_CALLER_PATH+"LMNRADIUS_CALLER_PATH=$LMNRADIUS_CALLER_PATH"} \
+        ${LOCK_GATES_DEB+"LOCK_GATES_DEB=$LOCK_GATES_DEB"} \
+        ${LOCK_GATES_VERBOSE+"LOCK_GATES_VERBOSE=$LOCK_GATES_VERBOSE"} \
+        /bin/bash -p "$0" --lmnradius-clean-env "$@"
+fi
+shift
+# ---- end of the clean environment block ----
+CALLER_PATH="$LMNRADIUS_CALLER_PATH"
+unset LMNRADIUS_CALLER_PATH
 set -uo pipefail
 
 ROOT="$(cd "$(/usr/bin/dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -71,9 +101,11 @@ summary(){
 # gate <steps that follow>: they run only if the gate passes.
 gate(){
   echo "== lock gate =="
-  if /bin/bash scripts/check-lockfiles.sh; then
+  if /bin/bash -p scripts/check-lockfiles.sh; then
     pass "lock gate"
-    # Prefer control-plane tools from the venv (created by crabbox_bootstrap), only now.
+    # Only now the caller's tools, and control-plane tools from the venv (created by
+    # crabbox_bootstrap) before them.
+    export PATH="$CALLER_PATH"
     if [ -x "$ROOT/.venv/bin/ruff" ]; then export PATH="$ROOT/.venv/bin:$PATH"; fi
   else
     fail "lock gate"
@@ -141,6 +173,8 @@ e2e(){
     skip "freeradius-e2e" "LMNRADIUS_ALLOW_REAL!=1"
     return
   fi
+  # docker compose and the caller's tools; e2e runs nothing from a lockfile
+  export PATH="$CALLER_PATH"
   if ! have docker; then skip "freeradius-e2e" "docker not installed"; return; fi
   if [ -x scripts/tests/e2e_radius.sh ]; then
     # e2e_radius.sh brings up deploy/e2e, runs the 5-case PEAP-MSCHAPv2 matrix and
