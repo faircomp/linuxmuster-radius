@@ -204,10 +204,10 @@ startet `linuxmuster-radius`, danach behalten Upgrades, was der Admin entschiede
   mit dem neuen Code neu und aktualisiert die Instanzen; er bleibt abgeschaltet.
 - **Maskiert** (`systemctl mask`): das Paket lässt ihn in Ruhe.
 - **Entfernen und neu installieren:** `apt remove` stoppt den Dienst nur und behält die
-  Entscheidung (die Unit bleibt maskiert, solange das Paket entfernt ist); eine Neuinstallation
-  stellt sie wieder her. `apt purge` vergisst sie: die nächste Installation ist eine neue,
-  aktiviert und gestartet. Nach dem Entfernen von 7.3.5 oder älter ist eine Neuinstallation
-  ebenfalls eine neue (diese Versionen haben den Dienst beim Entfernen abgeschaltet).
+  Entscheidung; eine Neuinstallation stellt sie wieder her. `apt purge` vergisst sie: die
+  nächste Installation ist eine neue, aktiviert und gestartet. Nach dem Entfernen von 7.3.5 oder
+  älter ist eine Neuinstallation ebenfalls eine neue (diese Versionen haben den Dienst beim
+  Entfernen abgeschaltet).
 - **Das erste Upgrade auf 7.3.6** übernimmt einmalig den Zustand, in dem der Dienst in diesem
   Moment ist: 7.3.5 und älter haben ihn nicht festgehalten. Aktiviert bleibt aktiviert,
   abgeschaltet oder maskiert bleibt so.

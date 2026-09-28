@@ -120,6 +120,8 @@ chmod -R go-w /opt/linuxmuster-radius
 # server coming from 7.3.5 or older. Without a running systemd (image build, chroot) only the
 # links are made and the service starts with the next boot.
 UNIT=linuxmuster-radius.service
+# unmask as dh_installsystemd still does: it lifts only a mask deb-systemd-helper set itself
+# (older debhelper masked on remove), never one of the admin.
 deb-systemd-helper unmask "$UNIT" >/dev/null || true
 if deb-systemd-helper --quiet was-enabled "$UNIT"; then
     deb-systemd-helper enable "$UNIT" >/dev/null || true

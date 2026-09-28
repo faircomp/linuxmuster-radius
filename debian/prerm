@@ -5,8 +5,8 @@ set -e
 # Stop ONLY on a real remove. On upgrade ($1=upgrade), keep the service RUNNING so the
 # postinst restarts it (new code); stopping it here would leave it inactive after the
 # upgrade. Whether it is enabled stays the admin's decision (Debian's rule, as
-# dh_installsystemd does it): the postrm masks the unit while the package is removed, a
-# reinstall restores the decision, a purge forgets it. Up to 7.3.5 remove also disabled it.
+# dh_installsystemd does it): a reinstall after a remove restores it, a purge forgets it
+# (postrm). Up to 7.3.5 remove also disabled it.
 if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
     deb-systemd-invoke stop linuxmuster-radius.service >/dev/null || true
 fi

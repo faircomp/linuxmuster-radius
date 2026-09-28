@@ -5,16 +5,13 @@ set -e
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
 fi
-# The admin's enable/disable decision survives a remove (the unit stays masked until the
-# postinst of a reinstall unmasks it) and is forgotten on purge. deb-systemd-helper comes
-# with init-system-helpers, which is Essential.
-if [ "$1" = remove ]; then
-    deb-systemd-helper mask linuxmuster-radius.service >/dev/null || true
-fi
 # Deliberately do NOT delete config/state + venv on remove (only on purge).
 if [ "$1" = "purge" ]; then
+    # The admin's enable/disable decision survives a remove (the prerm only stops the service)
+    # and is forgotten here, as debhelper 13.14's dh_installsystemd snippet does it (no mask on
+    # remove, no unmask on purge since debhelper 13.10). deb-systemd-helper comes with
+    # init-system-helpers, which is Essential.
     deb-systemd-helper purge linuxmuster-radius.service >/dev/null || true
-    deb-systemd-helper unmask linuxmuster-radius.service >/dev/null || true
     rm -rf /opt/linuxmuster-radius
     rm -rf /etc/linuxmuster-radius /var/lib/linuxmuster-radius
 fi
