@@ -52,9 +52,9 @@ lmnradius health                                            # {"status":"ok"}
 Der `postinst` legt den System-User `lmnradius`, `/etc/linuxmuster-radius/{config.yml (0600,
 zufälliges Token),secrets,certs}` und das State-Verzeichnis als Git-Repo an (jede Instanz-
 Änderung ein Commit, `sudo -u lmnradius git -C /var/lib/linuxmuster-radius/instances log` —
-als der Besitzer `lmnradius`: root selbst lehnt git dort mit „dubious ownership“ ab) und startet
-den Dienst. Das Image (`ghcr.io/faircomp/linuxmuster-radius`, **public**) wird bei `reconcile`
-gezogen.
+als der Besitzer `lmnradius`: root selbst lehnt git dort mit „dubious ownership“ ab), aktiviert
+und startet den Dienst. Das Image (`ghcr.io/faircomp/linuxmuster-radius`, **public**) wird bei
+`reconcile` gezogen.
 *(Optionale Härtung: `deploy/docker-socket-proxy.yml` starten und `docker_host: "tcp://127.0.0.1:2375"` in `config.yml` setzen.)*
 
 ## 2. Auf dem linuxmuster-DC — AD vorbereiten
@@ -236,8 +236,11 @@ gegen jede SSID. Ubuntus Build kennt kein `-d` (die Ausgabe ist ohne bereits vol
 
 ## 9. Updates (alles über den `.deb`)
 ```bash
-sudo apt upgrade                               # neues .deb -> postinst: try-restart + 'lmnradius update-all'
+sudo apt upgrade                               # neues .deb -> postinst: Neustart + 'lmnradius update-all'
 ```
+Das gilt, solange der Dienst aktiviert ist oder noch läuft: ein mit `systemctl disable --now`
+abgeschalteter Dienst bleibt aus, und die Instanzen werden nicht aktualisiert
+([operations.md](operations.md#dienst-abgeschaltet-lassen)).
 
 > **Upgrade von 7.3.0 oder älter — ein Pflichtschritt:** Instanzen aus diesen Versionen
 > prüfen das DC-Zertifikat der LDAPS-Verbindung **nicht** (Sicherheitsbefund, siehe

@@ -1,3 +1,36 @@
+linuxmuster-radius (7.3.6) lmn73; urgency=medium
+
+  * Upgrades respect a service the admin switched off. Up to 7.3.5 every
+    install, upgrade and dpkg-reconfigure enabled and started
+    linuxmuster-radius.service again, and updated the RADIUS instances
+    through it (lmnradius update-all).
+    The package now follows Debian's rules (deb-systemd-helper and
+    deb-systemd-invoke, as packages built with dh_installsystemd do): a new
+    installation enables and starts the service; after that, upgrades keep
+    the admin's decision. Enabled: the service is restarted with the new
+    code, and started if it was stopped. Disabled ("systemctl disable
+    --now linuxmuster-radius"): it stays disabled and stopped, the
+    instances are not updated, and apt shows one line saying so; run
+    "lmnradius update-all" after starting the service. Disabled but still
+    running: restarted with the new code, not enabled. Masked: left alone.
+    docs/operations.md explains how to keep the service off.
+  * The first upgrade to 7.3.6 takes over the state the service is in at
+    that moment (the new preinst records it once), because 7.3.5 and older
+    kept no record of it: a service that is disabled then stays disabled.
+  * Removing the package now only stops the service; it is no longer
+    disabled. The decision is kept while the package is removed and applies
+    again when it is reinstalled; purge forgets it. Reinstalling after
+    removing 7.3.5 or older enables and starts the service like a new
+    installation.
+  * Installed without a running systemd (an image build, a chroot), the
+    service is now enabled and starts with the next boot; before, it was not
+    enabled at all. Where /usr/sbin/policy-rc.d forbids starting services
+    (build containers), the package no longer starts or restarts it.
+  * A downgrade to 7.3.5 or older brings the old behaviour back: that
+    version enables and starts the service again on its install.
+
+ -- Kevin Stenzel <mail@kevin-stenzel.de>  Mon, 28 Sep 2026 15:29:04 +0200
+
 linuxmuster-radius (7.3.5) lmn73; urgency=medium
 
   * The API's OpenAPI document (/openapi.json, the interactive docs under

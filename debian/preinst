@@ -1,0 +1,27 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Kevin Stenzel
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -e
+
+# One-time transition to Debian's service rules (7.3.6). Up to 7.3.5 the maintainer scripts
+# enabled the service by hand and never recorded deb-systemd-helper state, and without that
+# state `deb-systemd-helper was-enabled` answers "enabled" even for a service the admin
+# disabled, so the postinst would enable it again. On an upgrade of the installed package the
+# old unit and the admin's choice are still in place: record them now, before anything
+# changes. Enabled -> enable (records the existing link), disabled or masked -> update-state
+# (known, not enabled). Not while systemd is down (an image build, a chroot): the old postinst
+# enabled the service only while systemd ran, so a missing link there is no admin decision,
+# and the postinst enables it like a new installation. A reinstall from the config-files state
+# ("install <version>") is left alone for the same reason: the old prerm disabled the service
+# on remove, the admin did not.
+UNIT=linuxmuster-radius.service
+if [ "$1" = upgrade ] && ! deb-systemd-helper debian-installed "$UNIT"; then
+    if [ "$(systemctl is-enabled "$UNIT" 2>/dev/null)" = enabled ]; then
+        deb-systemd-helper enable "$UNIT" >/dev/null || true
+    elif [ -d /run/systemd/system ]; then
+        deb-systemd-helper update-state "$UNIT" >/dev/null || true
+    fi
+fi
+
+#DEBHELPER#
+exit 0

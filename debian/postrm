@@ -5,8 +5,18 @@ set -e
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
 fi
+# The admin's enable/disable decision survives a remove (the unit stays masked until the
+# postinst of a reinstall unmasks it) and is forgotten on purge; Debian's rule, as
+# dh_installsystemd does it.
+if [ "$1" = remove ] && [ -x /usr/bin/deb-systemd-helper ]; then
+    deb-systemd-helper mask linuxmuster-radius.service >/dev/null || true
+fi
 # Deliberately do NOT delete config/state + venv on remove (only on purge).
 if [ "$1" = "purge" ]; then
+    if [ -x /usr/bin/deb-systemd-helper ]; then
+        deb-systemd-helper purge linuxmuster-radius.service >/dev/null || true
+        deb-systemd-helper unmask linuxmuster-radius.service >/dev/null || true
+    fi
     rm -rf /opt/linuxmuster-radius
     rm -rf /etc/linuxmuster-radius /var/lib/linuxmuster-radius
 fi

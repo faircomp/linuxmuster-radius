@@ -112,21 +112,45 @@ fi
 # blanket 0755), so anything intentionally restrictive stays as restrictive as it was.
 chmod -R go-w /opt/linuxmuster-radius
 
+# The service by Debian's rules, as dh_installsystemd's snippets do it, by hand because the
+# unit stays in /lib/systemd/system (moving it to /usr/lib within one package risks losing it
+# under usrmerge). deb-systemd-helper keeps the admin's decision: a new installation enables
+# the service, afterwards it stays as the admin left it, so `systemctl disable` survives
+# upgrades (up to 7.3.5 every configure enabled it again). The preinst recorded the state of a
+# server coming from 7.3.5 or older. Without a running systemd (image build, chroot) only the
+# links are made and the service starts with the next boot.
+UNIT=linuxmuster-radius.service
+deb-systemd-helper unmask "$UNIT" >/dev/null || true
+if deb-systemd-helper --quiet was-enabled "$UNIT"; then
+    deb-systemd-helper enable "$UNIT" >/dev/null || true
+else
+    deb-systemd-helper update-state "$UNIT" >/dev/null || true
+fi
+
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
-    systemctl enable linuxmuster-radius.service || true
-    # Load new code on a genuine upgrade (try-restart no-ops if the service is not
-    # running), then start unconditionally so it is up in ALL cases -- fresh install
-    # AND reinstall over a removed/config-files state, where try-restart alone would
-    # leave it stopped. `start` is a no-op if it is already running.
-    if [ -n "${2:-}" ]; then
-        systemctl try-restart linuxmuster-radius.service || true
+    # Enabled: restart on an upgrade (loads the new code, starts a stopped service), start on
+    # a new installation. Disabled or masked: only try-restart, so a service that still runs
+    # gets the new code and a stopped one stays stopped (restart would do the same for a
+    # disabled unit but print "not starting it", and it fails on a masked unit that runs).
+    # deb-systemd-invoke honours policy-rc.d.
+    if [ "$(systemctl is-enabled "$UNIT" 2>/dev/null)" = enabled ]; then
+        if [ -n "${2:-}" ]; then
+            deb-systemd-invoke restart "$UNIT" || true
+        else
+            deb-systemd-invoke start "$UNIT" || true
+        fi
+    else
+        deb-systemd-invoke try-restart "$UNIT" || true
     fi
-    systemctl start linuxmuster-radius.service || true
-    # On upgrade, lift all running instances onto this package's pinned default
-    # image (best-effort; each instance updates with its own health-check
-    # auto-rollback). Wait briefly for the restarted API; never fail the install.
-    if [ -n "${2:-}" ]; then
+    # On upgrade, lift all instances onto this package's pinned default image (best-effort;
+    # each instance updates with its own health-check auto-rollback), but only through a
+    # service that runs after this configure; a service the admin keeps off is not started
+    # for it. Wait briefly for the restarted API; never fail the install.
+    if [ -n "${2:-}" ] && ! systemctl is-active --quiet "$UNIT"; then
+        echo "linuxmuster-radius: the service is $(systemctl is-enabled "$UNIT" 2>/dev/null)" \
+             "and not running, instances not updated; run 'lmnradius update-all' after starting it"
+    elif [ -n "${2:-}" ]; then
         LMN=/opt/linuxmuster-radius/venv/bin/lmnradius
         i=0
         while [ "$i" -lt 30 ]; do
