@@ -32,6 +32,18 @@ jedes `create`/`set-ldap-ca`/`rm` ist ein Commit, `sudo -u lmnradius git -C
 und Identität als `lmnradius` an, schaltet git-Hintergrundwartung im Repo ab
 (`maintenance.auto false`, `gc.auto 0`) und holt beim Upgrade liegengebliebene Datensätze nach).
 
+Scheitert dabei ein git-Schritt (ab 7.3.5), bricht die `postinst` nicht ab: je Fehlschlag steht
+unter der Meldung von git eine Zeile `linuxmuster-radius: WARNING: instance change log
+/var/lib/linuxmuster-radius/instances: '<Schritt>' failed; …` auf stderr (apt zeigt sie), Paket
+und Dienst werden wie sonst eingerichtet. Bis zur Reparatur versioniert der Dienst
+Instanz-Änderungen nicht oder lehnt sie mit der Meldung von git ab. Reparatur: die Ursache aus
+der git-Meldung beheben (`sudo -u lmnradius git -C /var/lib/linuxmuster-radius/instances status`);
+ist das Repo nicht zu retten, `.git` beiseite legen und die `postinst` erneut laufen lassen:
+`mv /var/lib/linuxmuster-radius/instances/.git /root/instances-git.kaputt && dpkg-reconfigure
+linuxmuster-radius` (als root). Sie legt ein neues Repo an und übernimmt die vorhandenen
+Datensätze in einem Import-Commit; die alte Historie bleibt im beiseitegelegten Verzeichnis. Der
+Dienst wird dabei neu gestartet (wie bei einem Upgrade).
+
 ## Erstinbetriebnahme (einmalig)
 
 Reihenfolge — jeder Schritt setzt den vorigen voraus:

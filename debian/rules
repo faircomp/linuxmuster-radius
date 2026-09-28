@@ -13,6 +13,13 @@ PKG  := linuxmuster-radius
 DEST := /opt/$(PKG)/venv
 ROOT := $(CURDIR)/debian/$(PKG)
 
+# make splits paths at whitespace, and build-venv.sh starts with `rm -rf` on the venv path: a
+# build directory containing a space (a TMPDIR like "/work/odd dir") would turn part of it into
+# the venv path and delete it. Stop before anything runs; the paths below are quoted as well.
+ifneq ($(words $(CURDIR)),1)
+$(error build directory contains whitespace, refusing to build: '$(CURDIR)')
+endif
+
 %:
 	dh $@
 
@@ -22,8 +29,8 @@ override_dh_auto_configure override_dh_auto_build override_dh_auto_test:
 	@:
 
 override_dh_auto_install:
-	bash packaging/build-venv.sh $(ROOT)$(DEST)
-	debian/venv-relocate $(ROOT) $(DEST)
+	bash packaging/build-venv.sh "$(ROOT)$(DEST)"
+	debian/venv-relocate "$(ROOT)" "$(DEST)"
 
 override_dh_auto_clean:
 	rm -rf controlplane/build controlplane/*.egg-info
@@ -42,4 +49,4 @@ override_dh_fixperms:
 	dh_fixperms -X$(DEST)
 
 execute_before_dh_builddeb:
-	debian/venv-relocate --verify $(ROOT) $(DEST)
+	debian/venv-relocate --verify "$(ROOT)" "$(DEST)"

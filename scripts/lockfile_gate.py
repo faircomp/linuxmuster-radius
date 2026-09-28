@@ -7,7 +7,9 @@
         Every line is one pip reads exactly the way uv wrote it (see below).
     lockfile_gate.py pypi LOCK...
         Every hash is one PyPI publishes for that exact version, including the hashes of
-        files pip never downloads (an sdist, another platform's wheel).
+        files pip never downloads (an sdist, another platform's wheel). Exit 3 when PyPI
+        gives no answer at all (offline, DNS, timeout): nothing was verified, which the
+        callers say instead of blaming a hash.
     lockfile_gate.py freeze [--own NAME] [--drop NAME] FREEZE LOCK...
         FREEZE (the output of `pip freeze --all`) holds exactly the pins of the LOCKs, minus
         --drop, plus --own; every line is a plain name==version pin.
@@ -48,6 +50,7 @@ PIN = re.compile(r"([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)==([0-9][0-9A-Za-z.+!]*) \\"
 HASH = re.compile(r"    --hash=sha256:([0-9a-f]{64})( \\)?")
 COMMENT = re.compile(r" *#.*")
 FREEZE_PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)==([0-9][0-9A-Za-z.+!]*)")
+UNREACHABLE = 3  # `pypi`: PyPI gave no answer, nothing was verified
 
 
 @dataclass
@@ -197,6 +200,17 @@ def cmd_pypi(args: argparse.Namespace) -> int:
             # PyPI would only fail every further pin after the same retries.
             try:
                 known = published(pin)
+            # PyPI answered (e.g. 404: no such release), or gave no answer at all
+            # (URLError, TimeoutError and other OSErrors: offline, DNS).
+            except urllib.error.HTTPError as e:
+                errors.append(f"{path}: {pin}: cannot read PyPI: {e}")
+                return report(errors, "")
+            except (urllib.error.URLError, OSError) as e:
+                errors.append(
+                    f"{path}: {pin}: cannot read PyPI, no answer (offline?): {e}"
+                )
+                report(errors, "")
+                return UNREACHABLE
             except Exception as e:
                 errors.append(f"{path}: {pin}: cannot read PyPI: {e}")
                 return report(errors, "")

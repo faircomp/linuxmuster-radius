@@ -28,7 +28,7 @@ import zipfile
 
 TOOLS = (
     "diff comm sort awk grep cut cp python3 python pip uv sed tar git mktemp find env xargs "
-    "head tail wc tr cat rm mv chmod touch readlink bash"
+    "head tail wc tr cat rm mv chmod touch readlink bash dirname"
 ).split()
 
 

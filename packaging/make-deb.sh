@@ -18,7 +18,7 @@
 #   * modes as git records them (0644/0755, directories 0755), whatever the umask of the
 #     checkout or of this build; mtimes = the changelog date; tracked symlinks stay symlinks.
 # Deliberate exclusions from the published source: .github (workflows) and .claude
-# (developer tooling with internal endpoints/token ids); dpkg-source drops .gitignore files.
+# (developer tooling for Claude Code, not part of the package); dpkg-source drops .gitignore files.
 #
 # git only reads here, and nothing configured in the checkout runs: git's ownership guard stays
 # on (no safe.directory waiver -- a checkout owned by another user is refused, as git refuses
@@ -28,18 +28,46 @@
 # worktree whose repository is not mounted into the container, a refused owner -- stops the
 # build: packing the tree as it is would pack everything in it. Only without any .git (an
 # unpacked source package) is the tree built in place.
-set -euo pipefail
 
-# Which programs run is not left to the PATH, venv, Python/pip/uv or git variables of the caller
-# (R1). Not neutralized, and named as the limit: BASH_ENV (bash runs it before a script's first
-# line), exported shell functions, and the proxy/CA variables (HTTPS_PROXY, SSL_CERT_FILE,
-# REQUESTS_CA_BUNDLE, ...) that decide whom the build trusts as PyPI. Whoever sets those in the
-# caller's environment already runs code as the caller.
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
-for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_* | GIT_*) unset "$v" ;; esac
-done
+# Which programs run is not left to the caller (R1, A3, P1): the block below starts this script
+# again under `env -i` with an allowlist, so no variable or function of the caller reaches git,
+# tar, dpkg-buildpackage, dpkg-parsechangelog and debhelper (Perl) or the make runs of
+# debian/rules. So neither make flags (`make -i deb`: a failed gate would be ignored and a .deb
+# written anyway) nor variables set on make's command line (`make deb DEST=...`: the venv would be
+# built for another path), TAR_OPTIONS, PERL5OPT, GCONV_PATH or LD_LIBRARY_PATH get in. The
+# Makefile starts this script with /bin/bash -p, so the caller's SHELLOPTS (noexec) and BASH_ENV
+# do not apply to it either. The caller's own `make` of `make deb` has read MAKEFLAGS and
+# MAKEFILES before this script starts (a stated limit, see CLAUDE.md).
+# ---- clean environment (P1): the same block in every entry script (test_packaging.py) ----
+# Unless this is the clean run already, start again under `env -i` with exactly this allowlist,
+# through /bin/bash -p, which imports no function and reads no BASH_ENV, ENV, SHELLOPTS or
+# BASHOPTS: PATH=/usr/sbin:/usr/bin:/sbin:/bin, LANG and LC_ALL C.UTF-8, and, where set, HOME,
+# TMPDIR, http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE,
+# SSL_CERT_DIR, REQUESTS_CA_BUNDLE, PIP_CERT, and the switches the repository's scripts pass
+# each other: LMNRADIUS_ALLOW_REAL, LMNRADIUS_ALLOW_SKIP, LMNRADIUS_CALLER_PATH (run.sh),
+# LOCK_GATES_DEB, LOCK_GATES_VERBOSE (lock_gates.sh). Every other variable and every function of
+# the caller is gone. Up to the exec only keywords, assignments and one command by absolute path
+# run: POSIXLY_CORRECT puts bash into POSIX mode, where the special builtin `exec` comes before
+# any function the caller exported. The clean run is told by its first argument.
+if [[ "${1-}" != --lmnradius-clean-env ]]; then
+    POSIXLY_CORRECT=1
+    exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+        ${HOME+"HOME=$HOME"} ${TMPDIR+"TMPDIR=$TMPDIR"} \
+        ${http_proxy+"http_proxy=$http_proxy"} ${https_proxy+"https_proxy=$https_proxy"} \
+        ${no_proxy+"no_proxy=$no_proxy"} ${HTTP_PROXY+"HTTP_PROXY=$HTTP_PROXY"} \
+        ${HTTPS_PROXY+"HTTPS_PROXY=$HTTPS_PROXY"} ${NO_PROXY+"NO_PROXY=$NO_PROXY"} \
+        ${SSL_CERT_FILE+"SSL_CERT_FILE=$SSL_CERT_FILE"} ${SSL_CERT_DIR+"SSL_CERT_DIR=$SSL_CERT_DIR"} \
+        ${REQUESTS_CA_BUNDLE+"REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"} ${PIP_CERT+"PIP_CERT=$PIP_CERT"} \
+        ${LMNRADIUS_ALLOW_REAL+"LMNRADIUS_ALLOW_REAL=$LMNRADIUS_ALLOW_REAL"} \
+        ${LMNRADIUS_ALLOW_SKIP+"LMNRADIUS_ALLOW_SKIP=$LMNRADIUS_ALLOW_SKIP"} \
+        ${LMNRADIUS_CALLER_PATH+"LMNRADIUS_CALLER_PATH=$LMNRADIUS_CALLER_PATH"} \
+        ${LOCK_GATES_DEB+"LOCK_GATES_DEB=$LOCK_GATES_DEB"} \
+        ${LOCK_GATES_VERBOSE+"LOCK_GATES_VERBOSE=$LOCK_GATES_VERBOSE"} \
+        /bin/bash -p "$0" --lmnradius-clean-env "$@"
+fi
+shift
+# ---- end of the clean environment block ----
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PKG=linuxmuster-radius
@@ -185,7 +213,8 @@ if [ -n "$missing" ]; then
 fi
 bad_modes="$(tar -tvJf "$tar" | awk '$1 !~ /^(-rw-r--r--|-rwxr-xr-x|drwxr-xr-x|lrwxrwxrwx)$/')"
 [ -z "$bad_modes" ] || { printf '  %s\n' "$bad_modes" >&2; die "unexpected modes in the source tarball"; }
-say "source tarball holds exactly the tracked files minus .github/.claude ($(wc -l < "$work/expected")), modes 0644/0755"
+say "source tarball holds exactly the tracked files minus .github, .claude and the .gitignore" \
+    "files ($(wc -l < "$work/expected")), modes 0644/0755"
 
 # dpkg-buildpackage wrote the artefacts one level above the build tree (in $work); move them
 # next to the checkout, where CI and the developer expect them.

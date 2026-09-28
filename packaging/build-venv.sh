@@ -7,31 +7,61 @@
 # debian/venv-relocate, which makes the shebangs, activate scripts, pyvenv.cfg and .pyc files
 # correct for /opt/linuxmuster-radius/venv. The version of the control plane is the top entry
 # of debian/changelog (controlplane/setup.py reads it).
-set -euo pipefail
 
-# Which programs run is not left to the PATH, venv or Python/pip/uv settings of the caller (R1): a
-# fixed PATH without any venv bin/ (an activated venv, a checkout's .venv), no VIRTUAL_ENV, no
-# PYTHON*, UV_* or PIP_* variables and no pip configuration file. debian/rules calls this script
-# with a bare `bash`, and dpkg-buildpackage may be started by hand, so it cleans up itself. Not
-# neutralized, and named as the limit: BASH_ENV (bash runs it before a script's first line),
-# exported shell functions, and the proxy/CA variables (HTTPS_PROXY, SSL_CERT_FILE,
-# REQUESTS_CA_BUNDLE, ...) that decide whom pip and the gate trust as PyPI. Whoever sets those in
-# the caller's environment already runs code as the caller.
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
-for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_*) unset "$v" ;; esac
-done
+# debian/rules calls this script with a bare `bash`, and dpkg-buildpackage may be started by hand,
+# so it starts itself again in a clean environment (R1, A3, P1: the block below), and reads no pip
+# configuration file.
+# ---- clean environment (P1): the same block in every entry script (test_packaging.py) ----
+# Unless this is the clean run already, start again under `env -i` with exactly this allowlist,
+# through /bin/bash -p, which imports no function and reads no BASH_ENV, ENV, SHELLOPTS or
+# BASHOPTS: PATH=/usr/sbin:/usr/bin:/sbin:/bin, LANG and LC_ALL C.UTF-8, and, where set, HOME,
+# TMPDIR, http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE,
+# SSL_CERT_DIR, REQUESTS_CA_BUNDLE, PIP_CERT, and the switches the repository's scripts pass
+# each other: LMNRADIUS_ALLOW_REAL, LMNRADIUS_ALLOW_SKIP, LMNRADIUS_CALLER_PATH (run.sh),
+# LOCK_GATES_DEB, LOCK_GATES_VERBOSE (lock_gates.sh). Every other variable and every function of
+# the caller is gone. Up to the exec only keywords, assignments and one command by absolute path
+# run: POSIXLY_CORRECT puts bash into POSIX mode, where the special builtin `exec` comes before
+# any function the caller exported. The clean run is told by its first argument.
+if [[ "${1-}" != --lmnradius-clean-env ]]; then
+    POSIXLY_CORRECT=1
+    exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+        ${HOME+"HOME=$HOME"} ${TMPDIR+"TMPDIR=$TMPDIR"} \
+        ${http_proxy+"http_proxy=$http_proxy"} ${https_proxy+"https_proxy=$https_proxy"} \
+        ${no_proxy+"no_proxy=$no_proxy"} ${HTTP_PROXY+"HTTP_PROXY=$HTTP_PROXY"} \
+        ${HTTPS_PROXY+"HTTPS_PROXY=$HTTPS_PROXY"} ${NO_PROXY+"NO_PROXY=$NO_PROXY"} \
+        ${SSL_CERT_FILE+"SSL_CERT_FILE=$SSL_CERT_FILE"} ${SSL_CERT_DIR+"SSL_CERT_DIR=$SSL_CERT_DIR"} \
+        ${REQUESTS_CA_BUNDLE+"REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"} ${PIP_CERT+"PIP_CERT=$PIP_CERT"} \
+        ${LMNRADIUS_ALLOW_REAL+"LMNRADIUS_ALLOW_REAL=$LMNRADIUS_ALLOW_REAL"} \
+        ${LMNRADIUS_ALLOW_SKIP+"LMNRADIUS_ALLOW_SKIP=$LMNRADIUS_ALLOW_SKIP"} \
+        ${LMNRADIUS_CALLER_PATH+"LMNRADIUS_CALLER_PATH=$LMNRADIUS_CALLER_PATH"} \
+        ${LOCK_GATES_DEB+"LOCK_GATES_DEB=$LOCK_GATES_DEB"} \
+        ${LOCK_GATES_VERBOSE+"LOCK_GATES_VERBOSE=$LOCK_GATES_VERBOSE"} \
+        /bin/bash -p "$0" --lmnradius-clean-env "$@"
+fi
+shift
+# ---- end of the clean environment block ----
+set -euo pipefail
 export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1
 
+die() { echo "build-venv.sh: $*" >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 VENV="${1:?usage: build-venv.sh <venv directory>}"
+# The venv path is removed with `rm -rf` further down. Refuse, before anything else, a path that
+# could name something else: only an absolute path without whitespace and without . or ..
+# components, ending in /opt/linuxmuster-radius/venv -- debian/rules passes
+# <build dir>/debian/linuxmuster-radius/opt/linuxmuster-radius/venv. (A build directory with a
+# space once split that path, and the `rm -rf` hit a directory outside the build; T2.)
+case "$VENV" in
+    *[[:space:]]*) die "refusing venv path with whitespace: '$VENV'" ;;
+    */./* | */../* | */. | */.. | *//*) die "refusing venv path with . or .. or //: '$VENV'" ;;
+    /*/opt/linuxmuster-radius/venv | /opt/linuxmuster-radius/venv) ;;
+    *) die "refusing venv path '$VENV': it must be absolute and end in /opt/linuxmuster-radius/venv" ;;
+esac
 GATE="$ROOT/scripts/lockfile_gate.py"
 CP="$ROOT/controlplane"
 LOCKS=("$CP/build-requirements.lock" "$CP/requirements.lock")
 WHEELS="$(mktemp -d)"
 trap 'rm -rf "$WHEELS"' EXIT
-die() { echo "build-venv.sh: $*" >&2; exit 1; }
 # The system interpreter, isolated (-I: no PYTHON* variables, no user site, neither the script's
 # directory nor the working directory on sys.path) -- never one from a venv this script
 # populates from a lockfile.
@@ -51,7 +81,11 @@ echo "== lockfiles: grammar and published hashes =="
 "$PY" -I -B "$GATE" lint "${LOCKS[@]}" || die "a lockfile holds a line uv does not write"
 # 2. Every hash is one PyPI publishes for that exact version (pip only checks the file it
 #    downloads, so a replaced sdist or other-platform-wheel hash would pass pip).
-"$PY" -I -B "$GATE" pypi "${LOCKS[@]}" || die "a lockfile hash is not a file PyPI publishes"
+prc=0
+"$PY" -I -B "$GATE" pypi "${LOCKS[@]}" || prc=$?
+[ "$prc" != 3 ] || die "PyPI gave no answer (offline?): the lockfiles are NOT verified," \
+    "nothing is built"
+[ "$prc" = 0 ] || die "a lockfile pin or hash is not what PyPI publishes (FAIL lines above)"
 
 echo "== lockfiles: the uv lock, uv, and pin set == closure of the declared inputs =="
 # 3. scripts/check-lockfiles.sh, the one lock gate: the grammar of all three locks, the uv

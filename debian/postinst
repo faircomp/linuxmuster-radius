@@ -55,26 +55,51 @@ chmod 700 /etc/linuxmuster-radius/secrets /etc/linuxmuster-radius/certs
 # the tree on the next configure; linuxmuster-squid 7.3.1-7.3.3 failed its configure on
 # exactly that race. The service's own commits read the same repository config, so they
 # spawn none either. A change log of a few commits needs no gc.
+# A failing git step never stops the configure and never passes silently: the service and the
+# instance records do not depend on the change log (up to 7.3.4 `set -e` aborted the whole
+# configure on it). Each failure prints one WARNING line on stderr with the step and the
+# repository, below git's own message; the configure and the service handling below go on as
+# without it. Until the repository is repaired (docs/operations.md), the service records
+# instance changes unversioned or refuses them with git's message (Store).
 INST_DIR=/var/lib/linuxmuster-radius/instances
 if command -v git >/dev/null 2>&1; then
     # runuser resets HOME, not XDG_CONFIG_HOME: an admin environment pointing it into /root
     # (GitHub runners, `sudo -E`) would make every git call warn "unable to access
     # '/root/.config/git/...': Permission denied".
     as_lmnradius() { runuser -u lmnradius -- env -u XDG_CONFIG_HOME "$@"; }
+    log_git() { as_lmnradius git -C "$INST_DIR" "$@"; }
+    log_warn() {
+        echo "linuxmuster-radius: WARNING: instance change log $INST_DIR: '$1' failed;" \
+            "configuring goes on; repair the repository (docs/operations.md), until then" \
+            "instance changes are not versioned or are refused" >&2 || :
+    }
+    log_ok=1
     if [ ! -d "$INST_DIR/.git" ]; then
-        as_lmnradius git -C "$INST_DIR" -c init.defaultBranch=main init -q
+        log_git -c init.defaultBranch=main init -q || { log_warn "git init"; log_ok=; }
+    elif ! log_git rev-parse --git-dir >/dev/null; then
+        log_warn "git rev-parse (the repository is unusable, the other change-log steps are skipped)"
+        log_ok=
     fi
-    as_lmnradius git -C "$INST_DIR" config user.name  "linuxmuster-radius"
-    as_lmnradius git -C "$INST_DIR" config user.email "lmnradius@localhost"
-    as_lmnradius git -C "$INST_DIR" config maintenance.auto false
-    as_lmnradius git -C "$INST_DIR" config gc.auto 0
-    # Records written while the change log was broken (staged but never committed, or
-    # never added) become one import commit, so `git log` is complete after the upgrade.
-    for f in "$INST_DIR"/*.yaml; do
-        [ -e "$f" ] && as_lmnradius git -C "$INST_DIR" add -- "$(basename "$f")"
-    done
-    if ! as_lmnradius git -C "$INST_DIR" diff --cached --quiet; then
-        as_lmnradius git -C "$INST_DIR" commit -q -m "lmnradius: import existing instance records (package configure)"
+    if [ -n "$log_ok" ]; then
+        log_git config user.name "linuxmuster-radius" || log_warn "git config user.name"
+        log_git config user.email "lmnradius@localhost" || log_warn "git config user.email"
+        log_git config maintenance.auto false || log_warn "git config maintenance.auto false"
+        log_git config gc.auto 0 || log_warn "git config gc.auto 0"
+        # Records written while the change log was broken (staged but never committed, or
+        # never added) become one import commit, so `git log` is complete after the upgrade.
+        for f in "$INST_DIR"/*.yaml; do
+            [ -e "$f" ] || continue
+            f="$(basename "$f")"
+            log_git add -- "$f" || log_warn "git add $f"
+        done
+        # 0: nothing staged, 1: records to commit, anything else: git could not compare.
+        if log_git diff --cached --quiet; then log_rc=0; else log_rc=$?; fi
+        if [ "$log_rc" = 1 ]; then
+            log_git commit -q -m "lmnradius: import existing instance records (package configure)" \
+                || log_warn "git commit (import of existing instance records)"
+        elif [ "$log_rc" != 0 ]; then
+            log_warn "git diff --cached"
+        fi
     fi
 fi
 

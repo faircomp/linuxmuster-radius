@@ -289,14 +289,29 @@ genau das `uv==` aus `uv-requirements.in` mit von PyPI veröffentlichten Hashes 
 erst dann installiert es dieses uv in ein eigenes, isoliertes venv und ruft es per absolutem
 Pfad auf; uv löst `pyproject.toml`/`build-requirements.in` neu auf, die Pins müssen genau
 diese Hülle sein, und jeder Hash muss von PyPI für genau diese Fassung stammen. Aus der
-Umgebung des Aufrufers nehmen die Tore weder Programme noch Paketquellen: fester PATH ohne
-venv-`bin/`, `/usr/bin/python3 -I`, `VIRTUAL_ENV`/`PYTHON*`/`UV_*`/`PIP_*` entfernt (auch
-`PIP_REQUIREMENT`/`PIP_CONSTRAINT`), keine pip-/uv-Konfigurationsdateien, uv mit `--python
-/usr/bin/python3 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:**
-nicht neutralisiert sind `BASH_ENV` (bash führt es vor der ersten Skriptzeile aus),
-exportierte Shell-Funktionen und Proxy-/CA-Variablen (`HTTPS_PROXY`, `SSL_CERT_FILE`,
-`REQUESTS_CA_BUNDLE`, …), die bestimmen, wem das Tor als PyPI vertraut; wer die Umgebung des
-Aufrufers so setzt, führt ohnehin Code als dieser aus. Ein
+Umgebung des Aufrufers nehmen die Tore, der Bau (`build-venv.sh`, `make-deb.sh`), `run.sh` und
+die Test-Gerüste nur eine **Positivliste**: jedes dieser Skripte startet sich zuerst (derselbe
+Block, vor jedem anderen Befehl) unter `env -i` über `/bin/bash -p` neu (keine Funktionen, kein
+`BASH_ENV`/`ENV`/`SHELLOPTS`/`BASHOPTS`), mit festem `PATH=/usr/sbin:/usr/bin:/sbin:/bin`,
+`LANG`/`LC_ALL=C.UTF-8` und, wenn gesetzt, `HOME`, `TMPDIR`, den Proxy-Variablen (`http_proxy`,
+`https_proxy`, `no_proxy` in beiden Schreibweisen), den CA-Variablen (`SSL_CERT_FILE`,
+`SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`) und den Schaltern, mit denen die Skripte des
+Repos untereinander reden (`LMNRADIUS_ALLOW_REAL`, `LMNRADIUS_ALLOW_SKIP`,
+`LMNRADIUS_CALLER_PATH`, `LOCK_GATES_DEB`, `LOCK_GATES_VERBOSE`). Alles andere fällt weg, ohne
+Aufzählung (venvs, `PYTHON*`, `UV_*`, `PIP_*`, git, Perl, make — `make -i deb` baut nicht an
+einem roten Tor vorbei, `make deb DEST=…` verlegt das venv nicht —, `TAR_OPTIONS`, `GCONV_PATH`,
+`LD_LIBRARY_PATH`, jede Funktion). Bis zum Neustart laufen nur Schlüsselwörter, Zuweisungen und
+`exec /usr/bin/env`, mit `POSIXLY_CORRECT`, damit das Spezial-Builtin `exec` vor jeder Funktion
+kommt. Dazu keine pip-/uv-Konfigurationsdateien, `/usr/bin/python3 -I`, uv mit `--python
+/usr/bin/python3 --no-config` (kein Projekt-venv, keine umgelenkte Paketquelle). **Grenze:** nur,
+was vor dem Neustart läuft — die Shell des Aufrufers mit ihrem `BASH_ENV` und `SHELLOPTS`
+(`noexec`: ein direkt gestartetes Skript tut nichts und endet mit 0, ohne Urteilszeile; das
+Makefile und `run.sh` starten ihre Skripte deshalb mit `/bin/bash -p`), `LD_PRELOAD` für diese
+Shell und `/usr/bin/env`, das eigene `make` des Aufrufers von `make deb` —, und was die
+Positivliste bewusst durchlässt: Dateien unter `HOME` (Konfiguration von git und
+dpkg-buildpackage, pip-/uv-Caches; jede installierte Datei ist hash-geprüft) und die
+Proxy-/CA-Variablen, die bestimmen, wem das Tor als PyPI vertraut; wer das setzt, führt ohnehin
+Code als der Aufrufer aus. Ein
 zusätzlicher Pin mit echten Hashes wird so abgewiesen, bevor sein Code läuft (nachgewiesen:
 die K1-, R1- und R2-Fälle in `scripts/tests/lock_gates.sh`, die Marker entstehen nie; die
 Gegenproben ohne Tor erzeugen sie).

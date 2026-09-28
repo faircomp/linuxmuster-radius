@@ -23,8 +23,15 @@
 #       write the marker, and so does its .pth;
 #   R1  the gates are not steered by these parts of the caller's environment: an activated
 #       venv (bin/ first on PATH, VIRTUAL_ENV), a .venv in the checkout, PYTHONPATH/PYTHONHOME,
-#       UV_*/PIP_* variables and config files that redirect the index or the interpreter -- no
-#       marker, same verdicts;
+#       UV_*/PIP_* variables and config files that redirect the index or the interpreter,
+#       exported shell functions named like the builtins and tools a script could call (set,
+#       export, ., builtin, exec, exit, shift, cd, unset, compgen, mapfile, dirname),
+#       MAKEFILES/MAKEFLAGS/GNUMAKEFLAGS (with -i)/MAKEOVERRIDES, PERL5OPT/PERL5LIB, CDPATH,
+#       GCONV_PATH, LD_LIBRARY_PATH and TAR_OPTIONS (A3, P3) -- no marker, same verdicts; each of
+#       these parts is shown to run code where nothing removes it, and the clean-environment
+#       block run under all of it holds only its allowlist (P1); with LOCK_GATES_DEB, also
+#       `make -i deb`, GNUMAKEFLAGS=-i and SHELLOPTS=noexec write no .deb past a refused lock;
+#   T2  build-venv.sh refuses a venv path it must not remove, before anything runs;
 #   R2  the lock-related steps of ci.yml and release.yml (extracted word for word by
 #       scripts/tests/ci_step.py) stop at the gate with a planted package, before anything is
 #       installed; the counter-probe without the gate step installs it and the marker appears.
@@ -36,15 +43,38 @@
 # refusal's reason. LOCK_GATES_DEB=1 also runs the whole `make deb` (dpkg-buildpackage) on each
 # tampered tree and requires it to fail without a .deb and without a marker; run that inside
 # the build image, as a user who may write the checkout, after `apt-get build-dep .` (the
-# command is in the Makefile). The harness drops the same PATH/PYTHON*/UV_*/PIP_*/GIT_* parts of
-# its environment as the gates.
+# command is in the Makefile). The harness starts again in a clean environment with the same
+# block as the gates (of its own switches, LOCK_GATES_DEB and LOCK_GATES_VERBOSE pass).
+# ---- clean environment (P1): the same block in every entry script (test_packaging.py) ----
+# Unless this is the clean run already, start again under `env -i` with exactly this allowlist,
+# through /bin/bash -p, which imports no function and reads no BASH_ENV, ENV, SHELLOPTS or
+# BASHOPTS: PATH=/usr/sbin:/usr/bin:/sbin:/bin, LANG and LC_ALL C.UTF-8, and, where set, HOME,
+# TMPDIR, http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE,
+# SSL_CERT_DIR, REQUESTS_CA_BUNDLE, PIP_CERT, and the switches the repository's scripts pass
+# each other: LMNRADIUS_ALLOW_REAL, LMNRADIUS_ALLOW_SKIP, LMNRADIUS_CALLER_PATH (run.sh),
+# LOCK_GATES_DEB, LOCK_GATES_VERBOSE (lock_gates.sh). Every other variable and every function of
+# the caller is gone. Up to the exec only keywords, assignments and one command by absolute path
+# run: POSIXLY_CORRECT puts bash into POSIX mode, where the special builtin `exec` comes before
+# any function the caller exported. The clean run is told by its first argument.
+if [[ "${1-}" != --lmnradius-clean-env ]]; then
+    POSIXLY_CORRECT=1
+    exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+        ${HOME+"HOME=$HOME"} ${TMPDIR+"TMPDIR=$TMPDIR"} \
+        ${http_proxy+"http_proxy=$http_proxy"} ${https_proxy+"https_proxy=$https_proxy"} \
+        ${no_proxy+"no_proxy=$no_proxy"} ${HTTP_PROXY+"HTTP_PROXY=$HTTP_PROXY"} \
+        ${HTTPS_PROXY+"HTTPS_PROXY=$HTTPS_PROXY"} ${NO_PROXY+"NO_PROXY=$NO_PROXY"} \
+        ${SSL_CERT_FILE+"SSL_CERT_FILE=$SSL_CERT_FILE"} ${SSL_CERT_DIR+"SSL_CERT_DIR=$SSL_CERT_DIR"} \
+        ${REQUESTS_CA_BUNDLE+"REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"} ${PIP_CERT+"PIP_CERT=$PIP_CERT"} \
+        ${LMNRADIUS_ALLOW_REAL+"LMNRADIUS_ALLOW_REAL=$LMNRADIUS_ALLOW_REAL"} \
+        ${LMNRADIUS_ALLOW_SKIP+"LMNRADIUS_ALLOW_SKIP=$LMNRADIUS_ALLOW_SKIP"} \
+        ${LMNRADIUS_CALLER_PATH+"LMNRADIUS_CALLER_PATH=$LMNRADIUS_CALLER_PATH"} \
+        ${LOCK_GATES_DEB+"LOCK_GATES_DEB=$LOCK_GATES_DEB"} \
+        ${LOCK_GATES_VERBOSE+"LOCK_GATES_VERBOSE=$LOCK_GATES_VERBOSE"} \
+        /bin/bash -p "$0" --lmnradius-clean-env "$@"
+fi
+shift
+# ---- end of the clean environment block ----
 set -uo pipefail
-
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
-for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_* | GIT_*) unset "$v" ;; esac
-done
 export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -120,6 +150,28 @@ if [ "$FAIL" != 0 ]; then
     exit 1
 fi
 
+# ---------------------------------------------------------------- T2: the venv path
+# build-venv.sh removes its venv path with `rm -rf`: anything but an absolute path without
+# whitespace or . / .. / // components that ends in /opt/linuxmuster-radius/venv is refused
+# before anything runs, and the directory it names survives.
+mkdir -p "$TMP/t2/keep/opt/linuxmuster-radius/venv" "$TMP/t2/keep dir"
+echo keep > "$TMP/t2/keep/sentinel"
+echo keep > "$TMP/t2/keep/opt/linuxmuster-radius/venv/sentinel"
+T2_WHY="refusing venv path"
+expect fail "T2 build-venv: a relative path" "$T2_WHY" \
+    bash -c 'cd "$1" && bash "$2" keep/opt/linuxmuster-radius/venv' _ "$TMP/t2" "$ROOT/packaging/build-venv.sh"
+expect fail "T2 build-venv: a path that is not .../opt/linuxmuster-radius/venv" "$T2_WHY" \
+    bash "$ROOT/packaging/build-venv.sh" "$TMP/t2/keep"
+expect fail "T2 build-venv: whitespace in the path" "$T2_WHY" \
+    bash "$ROOT/packaging/build-venv.sh" "$TMP/t2/keep dir/opt/linuxmuster-radius/venv"
+expect fail "T2 build-venv: a .. component" "$T2_WHY" \
+    bash "$ROOT/packaging/build-venv.sh" "$TMP/t2/x/../keep/opt/linuxmuster-radius/venv"
+if [ -f "$TMP/t2/keep/sentinel" ] && [ -f "$TMP/t2/keep/opt/linuxmuster-radius/venv/sentinel" ]; then
+    echo "ok    T2 nothing was removed"; PASS=$((PASS + 1))
+else
+    echo "WRONG T2 build-venv.sh removed a directory it refused"; FAIL=$((FAIL + 1))
+fi
+
 # ---------------------------------------------------------------- the F2 matrix
 # Each case edits controlplane/requirements.lock in a copy of the files both scripts read.
 # The first pin and its hashes are found at run time, so the cases follow lockfile bumps.
@@ -171,7 +223,7 @@ for c in indented-url extra-index-url hashes-removed hash-changed extra-pin pin-
     cp "$ROOT/debian/changelog" "$dir/debian/"
     edit "$dir/controlplane/requirements.lock" "${EDIT[$c]}"
     expect fail "check: $c" "${CHECK_WHY[$c]}" bash "$dir/scripts/check-lockfiles.sh"
-    expect fail "build: $c" "${BUILD_WHY[$c]}" bash "$dir/packaging/build-venv.sh" "$dir/venv"
+    expect fail "build: $c" "${BUILD_WHY[$c]}" bash "$dir/packaging/build-venv.sh" "$dir/v/opt/linuxmuster-radius/venv"
     if [ -n "${LOCK_GATES_DEB:-}" ]; then
         copy_tree "$TMP/deb-$c/src"
         cp "$dir/controlplane/requirements.lock" "$TMP/deb-$c/src/controlplane/"
@@ -281,7 +333,7 @@ k1_case() {
     rm -f "$MARK"
     expect fail "K1 check: $label" "$why" bash "$dir/scripts/check-lockfiles.sh"
     no_marker "K1 check: $label"
-    expect fail "K1 build-venv: $label" "$why" bash "$dir/packaging/build-venv.sh" "$dir/v"
+    expect fail "K1 build-venv: $label" "$why" bash "$dir/packaging/build-venv.sh" "$dir/v/opt/linuxmuster-radius/venv"
     no_marker "K1 build-venv: $label"
     if [ -n "${LOCK_GATES_DEB:-}" ]; then
         expect fail "K1 make deb: $label" "$why" make -C "$dir" deb
@@ -348,12 +400,13 @@ assert s.count(old) == 1
 open(p, "w").write(s.replace(old, "true"))
 PY
 rm -f "$MARK"
-bash "$dir/packaging/build-venv.sh" "$dir/v" > "$TMP/out" 2>&1
+bash "$dir/packaging/build-venv.sh" "$dir/v/opt/linuxmuster-radius/venv" > "$TMP/out" 2>&1
 marker_from_bin "R6 counter-probe: build-venv.sh without the gate"
 
 # ------------------------------------------------ R1: these parts of the caller's environment
-# (BASH_ENV, exported shell functions and proxy/CA variables are the documented limit, not
-# tested here: whoever sets them already runs code as the caller)
+# (what the caller's bash does before the restart -- BASH_ENV, SHELLOPTS -- and the proxy/CA
+# variables the allowlist passes are the documented limit, not tested as poison here: whoever
+# sets them already runs code as the caller; SHELLOPTS=noexec is shown below as that limit)
 # An activated venv P with the wheel installed: its bin/ (diff, sort, awk, grep, python3, uv,
 # pip, bash, ...) first on PATH, VIRTUAL_ENV=P, UV_PYTHON pointing into it; PYTHONPATH with a
 # sitecustomize that writes the marker; PYTHONHOME that breaks every non-isolated Python;
@@ -378,6 +431,136 @@ POISON=(env "PATH=$P/bin:/usr/sbin:/usr/bin:/sbin:/bin" "VIRTUAL_ENV=$P"
     "UV_FIND_LINKS=$WHEELDIR" "UV_CONFIG_FILE=$TMP/r1-uv.toml"
     "PIP_INDEX_URL=http://127.0.0.1:9/simple" "PIP_FIND_LINKS=$WHEELDIR"
     "PIP_CONFIG_FILE=$TMP/r1-pip.conf" "GIT_CONFIG_PARAMETERS='core.fsmonitor'='$TMP/r1-fsmonitor'")
+# A3/P3: exported functions named like the builtins and tools a script could call before it is
+# clean (each writes the marker, then does what the builtin does), `builtin` and `exec` among
+# them; Perl's own variables, which dpkg-parsechangelog, dpkg-buildpackage and debhelper read;
+# CDPATH, which would send `cd scripts/..` of a script started by a relative path into
+# $TMP/r1-cdpath; GCONV_PATH with a gconv module and LD_LIBRARY_PATH with a libz.so.1 (a filter
+# on the real one), both writing the marker when loaded; TAR_OPTIONS with a checkpoint action
+# that writes the marker. gcc builds the two libraries (the test fails without it).
+command -v gcc > /dev/null || { echo "lock_gates.sh: gcc is required (GCONV_PATH, LD_LIBRARY_PATH)"; exit 1; }
+mkdir -p "$TMP/r1-perl" "$TMP/r1-cdpath/scripts/tests" "$TMP/r1-cdpath/packaging" \
+    "$TMP/r1-gconv" "$TMP/r1-ld"
+printf 'open(my $m, ">>", "%s"); print $m "perl ran PERL5OPT: $0\\n"; close $m; 1;\n' "$MARK" \
+    > "$TMP/r1-perl/ZzzPoison.pm"
+cat > "$TMP/r1-ld.c" << 'C'
+#include <stdio.h>
+__attribute__((constructor)) static void zzz(void) {
+    FILE *f = fopen(MARK, "a");
+    if (f) { fputs("LD_LIBRARY_PATH libz.so.1 ran\n", f); fclose(f); }
+}
+int gconv_init(void *step) {
+    FILE *f = fopen(MARK, "a");
+    if (f) { fputs("GCONV_PATH module ran\n", f); fclose(f); }
+    return 1;
+}
+int gconv(void) { return 1; }
+C
+gcc -shared -fPIC -DMARK="\"$MARK\"" -o "$TMP/r1-ld/libz.so.1" "$TMP/r1-ld.c" \
+    -Wl,-soname,libz.so.1 -Wl,--filter=/usr/lib/x86_64-linux-gnu/libz.so.1
+gcc -shared -fPIC -DMARK="\"$MARK\"" -o "$TMP/r1-gconv/ZZZPOISON.so" "$TMP/r1-ld.c"
+printf 'module ZZZPOISON// INTERNAL ZZZPOISON 1\nmodule INTERNAL ZZZPOISON// ZZZPOISON 1\n' \
+    > "$TMP/r1-gconv/gconv-modules"
+printf '#!/bin/sh\necho "TAR_OPTIONS checkpoint ran" >> %s\n' "$MARK" > "$TMP/r1-tar-hook"
+chmod +x "$TMP/r1-tar-hook"
+for f in set export . builtin exec exit shift cd unset compgen mapfile; do
+    POISON+=("BASH_FUNC_$f%%=() { echo \"function $f ran\" >> '$MARK'; command $f \"\$@\"; }")
+done
+POISON+=("BASH_FUNC_dirname%%=() { echo \"function dirname ran\" >> '$MARK'; /usr/bin/dirname \"\$@\"; }")
+POISON+=("PERL5OPT=-MZzzPoison" "PERL5LIB=$TMP/r1-perl" "CDPATH=$TMP/r1-cdpath"
+    "GCONV_PATH=$TMP/r1-gconv" "LD_LIBRARY_PATH=$TMP/r1-ld"
+    "TAR_OPTIONS=--checkpoint=1 --checkpoint-action=exec=$TMP/r1-tar-hook")
+# make's own variables go only to the scripts started directly (POISON_MAKE): `make deb` is the
+# caller's own make, which reads them before make-deb.sh starts (the stated limit); make-deb.sh
+# must keep them from the make runs of debian/rules. MAKEFILES adds a makefile that writes the
+# marker; MAKEFLAGS and GNUMAKEFLAGS set -i (ignore errors: a failed gate would not stop the
+# build) and make's SHELL to a script that writes the marker, and MAKEOVERRIDES sets that SHELL
+# in every recursive make (dh calls debian/rules again for its overrides).
+printf '$(shell echo "MAKEFILES read by make in $(CURDIR)" >> %s)\n' "$MARK" > "$TMP/r1-poison.mk"
+printf '#!/bin/sh\necho "make SHELL from MAKEFLAGS ran in $PWD" >> %s\nexec /bin/sh "$@"\n' "$MARK" \
+    > "$TMP/r1-make-shell"
+chmod +x "$TMP/r1-make-shell"
+POISON_MAKE=("MAKEFILES=$TMP/r1-poison.mk" "MAKEFLAGS=-i -- SHELL=$TMP/r1-make-shell"
+    "GNUMAKEFLAGS=-i -- SHELL=$TMP/r1-make-shell" "MAKEOVERRIDES=SHELL=$TMP/r1-make-shell")
+# Each new part of the poison is sharp: where nothing removes it, it runs code.
+sharp() {  # <label> <marker ERE> <command...>
+    local label="$1" want="$2"
+    shift 2
+    rm -f "$MARK"
+    "$@" > "$TMP/out" 2>&1
+    if grep -qE -- "$want" "$MARK" 2> /dev/null; then
+        echo "ok    R1 poison is sharp: $label"; PASS=$((PASS + 1))
+    else
+        echo "WRONG R1 poison is not sharp: $label (no /$want/ in the marker)"; FAIL=$((FAIL + 1))
+        tail -5 "$TMP/out" | sed 's/^/      /'
+    fi
+    rm -f "$MARK"
+}
+mkdir -p "$TMP/mk-sharp"
+printf 'all:\n\t@$(MAKE) --no-print-directory sub\nsub:\n\t@:\n' > "$TMP/mk-sharp/Makefile"
+sharp "exported functions set, export, cd run in a bash that keeps them" \
+    '^function set ran' "${POISON[@]}" /bin/bash -c 'set -e; export X=1; cd /'
+sharp "exported functions builtin, exec run in a bash that keeps them" \
+    '^function exec ran' "${POISON[@]}" /bin/bash -c 'builtin true; exec /bin/true'
+sharp "GCONV_PATH loads its module in iconv" '^GCONV_PATH module ran' \
+    "${POISON[@]}" /usr/bin/iconv -f ZZZPOISON -t UTF-8 /dev/null
+sharp "LD_LIBRARY_PATH loads its libz.so.1 in python3" '^LD_LIBRARY_PATH libz.so.1 ran' \
+    "${POISON[@]}" /usr/bin/python3 -I -c pass
+sharp "TAR_OPTIONS runs its checkpoint action in tar" '^TAR_OPTIONS checkpoint ran' \
+    "${POISON[@]}" /usr/bin/tar -cf /dev/null -C "$TMP" r1-perl
+sharp "exported functions unset, compgen, mapfile run when called without builtin" \
+    '^function mapfile ran' "${POISON[@]}" /bin/bash -c 'mapfile -t f < /dev/null; compgen -e; unset f'
+sharp "exported functions . and dirname run in a bash that keeps them" \
+    '^function dirname ran' "${POISON[@]}" /bin/bash -c '. /dev/null; dirname /x/y'
+sharp "dirname on the poisoned PATH is the wheel's" '^bin/dirname ran' "${POISON[@]}" dirname /x/y
+sharp "PERL5OPT/PERL5LIB run code in dpkg-parsechangelog" '^perl ran' \
+    "${POISON[@]}" /usr/bin/dpkg-parsechangelog -l "$ROOT/debian/changelog" -S Version
+for mv in MAKEFILES MAKEFLAGS GNUMAKEFLAGS MAKEOVERRIDES; do  # each on its own is sharp
+    others=()
+    for o in MAKEFILES MAKEFLAGS GNUMAKEFLAGS MAKEOVERRIDES; do
+        [ "$o" = "$mv" ] || others+=(-u "$o")
+    done
+    sharp "$mv reaches a make that keeps it" '^(MAKEFILES read|make SHELL from MAKEFLAGS)' \
+        "${POISON[@]}" "${POISON_MAKE[@]}" /usr/bin/env "${others[@]}" /usr/bin/make -C "$TMP/mk-sharp"
+done
+rm -f "$MARK"
+"${POISON[@]}" /bin/bash -c 'builtin cd / && builtin cd scripts/.. && pwd' > "$TMP/out" 2>&1
+if grep -q "r1-cdpath" "$TMP/out"; then
+    echo "ok    R1 poison is sharp: CDPATH sends a relative cd elsewhere"; PASS=$((PASS + 1))
+else
+    echo "WRONG R1 poison is not sharp: CDPATH"; FAIL=$((FAIL + 1)); sed 's/^/      /' "$TMP/out"
+fi
+rm -f "$MARK"
+# P1 itself: the clean-environment block of the entry scripts (test_packaging.py keeps it the
+# same everywhere), started under all of the poison and make's variables: the clean run sees
+# only the allowlist, no function, and runs as bash -p.
+{
+    echo '#!/usr/bin/env bash'
+    sed -n '/^# ---- clean environment (P1)/,/^# ---- end of the clean environment block ----/p' \
+        "$ROOT/scripts/check-lockfiles.sh"
+    echo 'printf "flags %s\n" "$-"; compgen -e | sed "s/^/env /"; compgen -A function | sed "s/^/function /"'
+} > "$TMP/r1-probe.sh"
+rm -f "$MARK"
+"${POISON[@]}" "${POISON_MAKE[@]}" "TMPDIR=$TMP" /bin/bash "$TMP/r1-probe.sh" > "$TMP/probe" 2>&1
+ALLOWED=" PATH LANG LC_ALL HOME TMPDIR http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY \
+NO_PROXY SSL_CERT_FILE SSL_CERT_DIR REQUESTS_CA_BUNDLE PIP_CERT LMNRADIUS_ALLOW_REAL \
+LMNRADIUS_ALLOW_SKIP LMNRADIUS_CALLER_PATH LOCK_GATES_DEB LOCK_GATES_VERBOSE PWD SHLVL OLDPWD _ "
+extra=""
+while read -r kind name _; do
+    case "$kind" in
+        env) [[ "$ALLOWED" == *" $name "* ]] || extra="$extra $name" ;;
+        function) extra="$extra function:$name" ;;
+    esac
+done < "$TMP/probe"
+if grep -qx 'flags .*p.*' "$TMP/probe" && grep -qx 'env PATH' "$TMP/probe" && [ -z "$extra" ] \
+    && [ ! -e "$MARK" ]; then
+    echo "ok    P1 the restarted run holds only the allowlist ($(grep -c '^env ' "$TMP/probe") variables), no function, bash -p"
+    PASS=$((PASS + 1))
+else
+    echo "WRONG P1 the restarted run holds more than the allowlist:$extra"; FAIL=$((FAIL + 1))
+    sed 's/^/      /' "$TMP/probe" | head -40; sed 's/^/      marker: /' "$MARK" 2> /dev/null
+fi
+rm -f "$MARK"
 poison_dotvenv() {  # <checkout copy>: a poisoned .venv with a ruff, so run.sh would use it
     /usr/bin/python3 -I -m venv "$1/.venv"
     "$1/.venv/bin/python" -I -m pip install -q --no-index --no-deps "$WHEEL"
@@ -389,10 +572,11 @@ dir="$TMP/r1-clean"
 copy_tree "$dir"
 poison_dotvenv "$dir"
 rm -f "$MARK"
-expect ok "R1 check (poisoned env, clean locks)" "" "${POISON[@]}" /bin/bash "$dir/scripts/check-lockfiles.sh"
+expect ok "R1 check (poisoned env, clean locks)" "" \
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/scripts/check-lockfiles.sh"
 no_marker "R1 check (poisoned env, clean locks)"
 expect ok "R1 run.sh gate (poisoned env + .venv, clean locks)" "" \
-    "${POISON[@]}" /bin/bash "$dir/scripts/tests/run.sh" gate
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/scripts/tests/run.sh" gate
 no_marker "R1 run.sh gate (poisoned env + .venv, clean locks)"
 # a planted runtime pin is still refused, for the same reason, and nothing of it runs
 dir="$TMP/r1-planted"
@@ -401,14 +585,14 @@ plant "$dir" runtime
 poison_dotvenv "$dir"
 rm -f "$MARK"
 expect fail "R1 check (poisoned env, K1 pin)" "pins differ from a fresh" \
-    "${POISON[@]}" /bin/bash "$dir/scripts/check-lockfiles.sh"
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/scripts/check-lockfiles.sh"
 no_marker "R1 check (poisoned env, K1 pin)"
 expect fail "R1 build-venv (poisoned env, K1 pin)" "pins differ from a fresh" \
-    "${POISON[@]}" /bin/bash "$dir/packaging/build-venv.sh" "$dir/v"
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/packaging/build-venv.sh" "$dir/v/opt/linuxmuster-radius/venv"
 no_marker "R1 build-venv (poisoned env, K1 pin)"
 # run.sh lint: the gate runs first and fails, so neither .venv's ruff nor anything else runs
 expect fail "R1 run.sh lint (poisoned env + .venv, K1 pin)" "\[FAIL\] lock gate" \
-    "${POISON[@]}" /bin/bash "$dir/scripts/tests/run.sh" lint
+    "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/scripts/tests/run.sh" lint
 no_marker "R1 run.sh lint (poisoned env + .venv, K1 pin)"
 if [ -n "${LOCK_GATES_DEB:-}" ]; then
     expect fail "R1 make deb (poisoned env + .venv, K1 pin)" "pins differ from a fresh" \
@@ -417,6 +601,57 @@ if [ -n "${LOCK_GATES_DEB:-}" ]; then
         echo "WRONG R1 make deb: left a .deb behind"; FAIL=$((FAIL + 1)); rm -f "$TMP/"*.deb
     fi
     no_marker "R1 make deb (poisoned env + .venv, K1 pin)"
+    # make-deb.sh started directly, with make's variables as well: dpkg-buildpackage runs
+    # `debian/rules clean` (make) and Perl before the gate, so a make or Perl setting or a
+    # function of the caller that got through would write the marker here.
+    expect fail "R1 make-deb.sh (poisoned env + make's variables, K1 pin)" \
+        "pins differ from a fresh" \
+        "${POISON[@]}" "${POISON_MAKE[@]}" /bin/bash "$dir/packaging/make-deb.sh"
+    if compgen -G "$TMP/"'*.deb' > /dev/null; then
+        echo "WRONG R1 make-deb.sh: left a .deb behind"; FAIL=$((FAIL + 1)); rm -f "$TMP/"*.deb
+    fi
+    no_marker "R1 make-deb.sh (poisoned env + make's variables, K1 pin)"
+    # The caller's make flags never carry the build past the gate: with -i (ignore errors) in
+    # the make runs of debian/rules, a failed build-venv.sh would be ignored and a .deb written
+    # (linuxmuster-squid 7.3.5 did). The caller's own make may ignore make-deb.sh's exit status
+    # (-i is its choice), but no .deb may appear.
+    for how in "make -i deb" "GNUMAKEFLAGS=-i make deb"; do
+        if [ "$how" = "make -i deb" ]; then
+            make -i -C "$dir" deb > "$TMP/out" 2>&1
+        else
+            env GNUMAKEFLAGS=-i make -C "$dir" deb > "$TMP/out" 2>&1
+        fi
+        if compgen -G "$TMP/"'*.deb' > /dev/null; then
+            echo "WRONG R1 $how (K1 pin): wrote a .deb although the gate refused the lock"
+            FAIL=$((FAIL + 1)); rm -f "$TMP/"*.deb
+        elif grep -q "pins differ from a fresh" "$TMP/out"; then
+            echo "ok    R1 $how (K1 pin): refused by the gate, no .deb"; PASS=$((PASS + 1))
+        else
+            echo "WRONG R1 $how (K1 pin): no .deb, but no refusal by the gate either"
+            FAIL=$((FAIL + 1)); tail -10 "$TMP/out" | sed 's/^/      /'
+        fi
+    done
+    no_marker "R1 make -i deb / GNUMAKEFLAGS=-i (K1 pin)"
+    # SHELLOPTS=noexec: the Makefile starts make-deb.sh with /bin/bash -p, so the caller's
+    # shell options do not apply and the gate still refuses (squid 7.3.5: "success" unchecked).
+    expect fail "R1 SHELLOPTS=noexec make deb (K1 pin)" "pins differ from a fresh" \
+        "${POISON[@]}" SHELLOPTS=noexec make -C "$dir" deb
+    if compgen -G "$TMP/"'*.deb' > /dev/null; then
+        echo "WRONG R1 SHELLOPTS=noexec make deb: left a .deb behind"; FAIL=$((FAIL + 1)); rm -f "$TMP/"*.deb
+    fi
+    no_marker "R1 SHELLOPTS=noexec make deb (K1 pin)"
+fi
+# The stated limit, shown: started directly by a bash that takes SHELLOPTS=noexec from the
+# environment, the gate is only read, not run -- exit 0 and no "ok ... verified" line. Every
+# start inside the repository goes through /bin/bash -p or a restarted, clean shell instead.
+env SHELLOPTS=noexec /bin/bash "$dir/scripts/check-lockfiles.sh" > "$TMP/out" 2>&1
+rc=$?
+if [ "$rc" = 0 ] && ! grep -q 'the lockfiles are verified' "$TMP/out"; then
+    echo "ok    R1 limit as documented: SHELLOPTS=noexec on a direct bash start runs nothing (exit 0, no verdict line)"
+    PASS=$((PASS + 1))
+else
+    echo "WRONG R1 SHELLOPTS=noexec on a direct start: exit $rc, unexpected (update the limit text)"
+    FAIL=$((FAIL + 1))
 fi
 
 # ------------------------------------------------ R2: CI verifies before it installs

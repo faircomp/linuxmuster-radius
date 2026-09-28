@@ -27,15 +27,51 @@
 #   R1  run nothing from these parts of the caller's environment: an activated venv with the
 #       K1 wheel (scripts/tests/k1_wheel.py: bin/ tools and a .pth, all writing the marker)
 #       first on PATH, VIRTUAL_ENV, PYTHONPATH with a marker sitecustomize, PYTHONHOME, UV_*/PIP_*
-#       redirections, and a poisoned .venv in the checkout.
+#       redirections, and a poisoned .venv in the checkout; and (A3) MAKEFILES, MAKEFLAGS,
+#       GNUMAKEFLAGS and MAKEOVERRIDES that would make every make run of debian/rules write the
+#       marker (the caller's own `make deb` in the checkout may read them: the stated limit), a
+#       variable on make's command line (`make deb DEST=...` must not move the venv), PERL5OPT/
+#       PERL5LIB that would write the marker in every Perl program (dpkg, debhelper), CDPATH,
+#       TAR_OPTIONS with a marker-writing checkpoint action, SHELLOPTS=noexec (the Makefile's
+#       /bin/bash -p ignores it: the build still runs), and exported functions named set,
+#       export, ., builtin, exec, exit, shift, cd, unset, compgen, mapfile and dirname (`make deb`
+#       starts make-deb.sh through /bin/sh, which does not pass them on; lock_gates.sh starts
+#       the scripts with them directly);
+#   T1  a TMPDIR with a space (make-deb.sh builds in a directory below it): debian/rules
+#       refuses before anything runs, and a directory named like the part before the space
+#       survives (with the old unquoted rules, build-venv.sh removed it with `rm -rf`).
 # Any marker line fails the test. Needs git, dpkg-dev, debhelper, python3-venv and PyPI.
+# The harness starts again in a clean environment with the same block as the gates.
+# ---- clean environment (P1): the same block in every entry script (test_packaging.py) ----
+# Unless this is the clean run already, start again under `env -i` with exactly this allowlist,
+# through /bin/bash -p, which imports no function and reads no BASH_ENV, ENV, SHELLOPTS or
+# BASHOPTS: PATH=/usr/sbin:/usr/bin:/sbin:/bin, LANG and LC_ALL C.UTF-8, and, where set, HOME,
+# TMPDIR, http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE,
+# SSL_CERT_DIR, REQUESTS_CA_BUNDLE, PIP_CERT, and the switches the repository's scripts pass
+# each other: LMNRADIUS_ALLOW_REAL, LMNRADIUS_ALLOW_SKIP, LMNRADIUS_CALLER_PATH (run.sh),
+# LOCK_GATES_DEB, LOCK_GATES_VERBOSE (lock_gates.sh). Every other variable and every function of
+# the caller is gone. Up to the exec only keywords, assignments and one command by absolute path
+# run: POSIXLY_CORRECT puts bash into POSIX mode, where the special builtin `exec` comes before
+# any function the caller exported. The clean run is told by its first argument.
+if [[ "${1-}" != --lmnradius-clean-env ]]; then
+    POSIXLY_CORRECT=1
+    exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+        ${HOME+"HOME=$HOME"} ${TMPDIR+"TMPDIR=$TMPDIR"} \
+        ${http_proxy+"http_proxy=$http_proxy"} ${https_proxy+"https_proxy=$https_proxy"} \
+        ${no_proxy+"no_proxy=$no_proxy"} ${HTTP_PROXY+"HTTP_PROXY=$HTTP_PROXY"} \
+        ${HTTPS_PROXY+"HTTPS_PROXY=$HTTPS_PROXY"} ${NO_PROXY+"NO_PROXY=$NO_PROXY"} \
+        ${SSL_CERT_FILE+"SSL_CERT_FILE=$SSL_CERT_FILE"} ${SSL_CERT_DIR+"SSL_CERT_DIR=$SSL_CERT_DIR"} \
+        ${REQUESTS_CA_BUNDLE+"REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"} ${PIP_CERT+"PIP_CERT=$PIP_CERT"} \
+        ${LMNRADIUS_ALLOW_REAL+"LMNRADIUS_ALLOW_REAL=$LMNRADIUS_ALLOW_REAL"} \
+        ${LMNRADIUS_ALLOW_SKIP+"LMNRADIUS_ALLOW_SKIP=$LMNRADIUS_ALLOW_SKIP"} \
+        ${LMNRADIUS_CALLER_PATH+"LMNRADIUS_CALLER_PATH=$LMNRADIUS_CALLER_PATH"} \
+        ${LOCK_GATES_DEB+"LOCK_GATES_DEB=$LOCK_GATES_DEB"} \
+        ${LOCK_GATES_VERBOSE+"LOCK_GATES_VERBOSE=$LOCK_GATES_VERBOSE"} \
+        /bin/bash -p "$0" --lmnradius-clean-env "$@"
+fi
+shift
+# ---- end of the clean environment block ----
 set -uo pipefail
-
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-unset VIRTUAL_ENV CONDA_PREFIX
-for v in $(compgen -e); do
-    case "$v" in PYTHON* | UV_* | PIP_* | GIT_*) unset "$v" ;; esac
-done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 TMP="$(mktemp -d)"
@@ -157,21 +193,44 @@ done
 mkdir -p "$TMP/pythonpath"
 printf "open(%s, 'a').write('sitecustomize ran\\\\n')\n" "'$MARK'" > "$TMP/pythonpath/sitecustomize.py"
 plant_git "$REPO"
+# A3: make's variables write the marker in every make but the caller's own in $REPO; Perl's in
+# every Perl program; CDPATH would send make-deb.sh's `cd packaging/..` elsewhere.
+printf 'ifneq ($(CURDIR),%s)\n$(shell echo "MAKEFILES read by make in $(CURDIR)" >> %s)\nendif\n' \
+    "$REPO" "$MARK" > "$TMP/poison.mk"
+printf '#!/bin/sh\n[ "$PWD" = %s ] || echo "make SHELL from MAKEFLAGS ran in $PWD" >> %s\nexec /bin/sh "$@"\n' \
+    "$REPO" "$MARK" > "$TMP/make-shell"
+chmod +x "$TMP/make-shell"
+mkdir -p "$TMP/perl" "$TMP/cdpath/packaging" "$TMP/cdpath/scripts"
+printf 'open(my $m, ">>", "%s"); print $m "perl ran PERL5OPT: $0\\n"; close $m; 1;\n' "$MARK" \
+    > "$TMP/perl/ZzzPoison.pm"
 POISON=(env "PATH=$TMP/activated/bin:/usr/sbin:/usr/bin:/sbin:/bin" "VIRTUAL_ENV=$TMP/activated"
     "PYTHONPATH=$TMP/pythonpath" "PYTHONHOME=$TMP/activated" "UV_PYTHON=$TMP/activated/bin/python3"
     "UV_INDEX_URL=http://127.0.0.1:9/simple" "PIP_INDEX_URL=http://127.0.0.1:9/simple"
     "PIP_FIND_LINKS=$TMP" "GIT_CONFIG_PARAMETERS='core.fsmonitor'='$TMP/fsmonitor'"
-    "GIT_DIR=$TMP/nonexistent")
+    "GIT_DIR=$TMP/nonexistent" "MAKEFILES=$TMP/poison.mk" "MAKEFLAGS=-- SHELL=$TMP/make-shell"
+    "GNUMAKEFLAGS=-- SHELL=$TMP/make-shell" "MAKEOVERRIDES=SHELL=$TMP/make-shell"
+    "PERL5OPT=-MZzzPoison" "PERL5LIB=$TMP/perl"
+    "CDPATH=$TMP/cdpath" "TAR_OPTIONS=--checkpoint=1 --checkpoint-action=exec=$TMP/tar-hook"
+    "SHELLOPTS=noexec")
+printf '#!/bin/sh\necho "TAR_OPTIONS checkpoint ran" >> %s\n' "$MARK" > "$TMP/tar-hook"
+chmod +x "$TMP/tar-hook"
+for f in set export . builtin exec exit shift cd unset compgen mapfile; do
+    POISON+=("BASH_FUNC_$f%%=() { echo \"function $f ran\" >> '$MARK'; command $f \"\$@\"; }")
+done
+POISON+=("BASH_FUNC_dirname%%=() { echo \"function dirname ran\" >> '$MARK'; /usr/bin/dirname \"\$@\"; }")
 rm -f "$MARK"
-(cd "$REPO" && "${POISON[@]}" make deb) > "$TMP/out" 2>&1
+(cd "$REPO" && "${POISON[@]}" make deb DEST=/opt/zzz-moved) > "$TMP/out" 2>&1
 rc=$?
-if [ "$rc" = 0 ] && [ -f "$parent/linuxmuster-radius_${VERSION}_amd64.deb" ]; then
+DEB="$parent/linuxmuster-radius_${VERSION}_amd64.deb"
+if [ "$rc" = 0 ] && [ -f "$DEB" ]; then
     ok "dirty checkout, poisoned environment: make deb builds the .deb"
 else
     wrong "dirty checkout: make deb failed (exit $rc)"
     tail -30 "$TMP/out" | sed 's/^/      /'
 fi
-no_marker "dirty build (fsmonitor, filter, hooks, git env, activated venv, .venv, PYTHONPATH)"
+check "A3 make deb DEST=/opt/zzz-moved: the venv stays at /opt/linuxmuster-radius/venv" \
+    bash -c "dpkg-deb -c '$DEB' > '$TMP/debc' && grep -q ' ./opt/linuxmuster-radius/venv/bin/lmnradius\$' '$TMP/debc' && ! grep -q zzz-moved '$TMP/debc'"
+no_marker "dirty build (.git config, git env, venvs, PYTHONPATH, make, Perl, CDPATH, functions)"
 
 # R4: the warnings, before AND after the build (so they are seen after dpkg's output)
 warns() {  # <label> <fixed string>: printed twice
@@ -220,6 +279,23 @@ if [ -f "$TAR" ]; then
 else
     wrong "R3: no source tarball at $TAR"
 fi
+
+# ------------------------------------------------------------ T1: a build directory with a space
+mkdir -p "$TMP/odd" "$TMP/odd dir"
+echo keep > "$TMP/odd/sentinel"
+rm -f "$parent"/linuxmuster-radius_*
+(cd "$REPO" && env TMPDIR="$TMP/odd dir" make deb) > "$TMP/out" 2>&1
+rc=$?
+if [ "$rc" != 0 ] && grep -q 'build directory contains whitespace, refusing to build' "$TMP/out"; then
+    ok "T1 TMPDIR with a space: debian/rules refuses (exit $rc)"
+else
+    wrong "T1 TMPDIR with a space: expected debian/rules to refuse (exit $rc)"
+    tail -15 "$TMP/out" | sed 's/^/      /'
+fi
+check "T1 the directory before the space survives" test -f "$TMP/odd/sentinel"
+check "T1 no package was written" \
+    test -z "$(find "$parent" -maxdepth 1 -name 'linuxmuster-radius_*' -print -quit)"
+check "T1 build-venv.sh never ran" bash -c "! grep -q '== venv @' '$TMP/out'"
 
 # ------------------------------------------------------------ R3: a worktree out of reach
 # As in a container that mounts only the worktree: its .git file points into a repository git

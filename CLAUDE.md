@@ -80,12 +80,34 @@ conventions are `../../docs/paket-konventionen.md` there. The rules that bite he
   gate) install fixture locks that pin only the test wheel, never the checkout's. It verifies
   all three locks — grammar, every hash on PyPI, pin set == closure of the declared inputs
   (uv re-resolves `pyproject.toml`/`build-requirements.in`) — and installs the uv it needs
-  itself, from the verified uv lock into an isolated venv, called by absolute path. The
-  gates run `/usr/bin/python3 -I`, set a fixed PATH and drop `VIRTUAL_ENV`, `PYTHON*`,
-  `UV_*` and `PIP_*` (and pip/uv config files), so an activated venv or a `.venv` in the
-  checkout takes no part. Not neutralized, a stated limit: `BASH_ENV`, exported shell
-  functions and proxy/CA variables (`HTTPS_PROXY`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, …)
-  — whoever sets those already runs code as the caller, or decides whom the gate trusts as PyPI.
+  itself, from the verified uv lock into an isolated venv, called by absolute path.
+  **The caller's environment (P1, an allowlist):** `scripts/check-lockfiles.sh`,
+  `packaging/build-venv.sh`, `packaging/make-deb.sh`, `scripts/tests/run.sh`,
+  `scripts/tests/lock_gates.sh` and `scripts/tests/make_deb_checks.sh` start with one and the same
+  block (`test_packaging.py` keeps it equal and first): unless it is the clean run already, the
+  script starts itself again under `env -i` through `/bin/bash -p` (which imports no function and
+  reads no `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`) with exactly this environment:
+  `PATH=/usr/sbin:/usr/bin:/sbin:/bin`, `LANG`/`LC_ALL=C.UTF-8`, and where set `HOME`, `TMPDIR`,
+  the proxy variables (`http_proxy`, `https_proxy`, `no_proxy` and the upper-case three), the CA
+  variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`) and the switches
+  the repository's scripts pass each other (`LMNRADIUS_ALLOW_REAL`, `LMNRADIUS_ALLOW_SKIP`,
+  `LMNRADIUS_CALLER_PATH`, `LOCK_GATES_DEB`, `LOCK_GATES_VERBOSE`). Everything else is gone
+  without a list: venvs, `PYTHON*`, `UV_*`, `PIP_*`, `GIT_*`, Perl, make (`make -i deb` cannot
+  build past a failed gate, `make deb DEST=...` cannot move the venv), `TAR_OPTIONS`,
+  `GCONV_PATH`, `LD_LIBRARY_PATH`, `CDPATH`, and every function (`builtin`, `exec` included). Up
+  to the restart only keywords, assignments and `exec /usr/bin/env` run, with `POSIXLY_CORRECT`
+  set so that the special builtin `exec` comes before any function. The gates also read no
+  pip/uv config file and run `/usr/bin/python3 -I`. The Makefile starts `make-deb.sh`, and
+  `run.sh` its gate, with `/bin/bash -p`. `run.sh` keeps the caller's PATH aside
+  (`LMNRADIUS_CALLER_PATH`) and gives it back only after the gate passed: lint, unit and e2e use
+  the caller's tools on purpose. **Limit:** only what runs before the restart: the caller's shell
+  with its `BASH_ENV` and `SHELLOPTS` (`noexec` makes a directly started script do nothing and
+  end 0 — no verdict line, no summary line), `LD_PRELOAD` for that shell and `/usr/bin/env`, the
+  caller's own `make` of `make deb` (it reads `MAKEFLAGS`/`MAKEFILES` itself), and passing the
+  restart marker `--lmnradius-clean-env` as first argument by hand; plus what the allowlist
+  passes on purpose: files under `HOME` (git's and dpkg-buildpackage's configuration, pip/uv
+  caches: every installed file is hash-checked) and the proxy/CA variables, which decide whom
+  the gate trusts as PyPI. Whoever sets those already runs code as the caller.
   Limit: pins are compared with the closure by name; another real release of a pinned
   package (older or newer, a week old, genuine hashes) that satisfies the declared
   requirements passes every gate — only the review of the lockfile diff catches it.
@@ -246,16 +268,21 @@ real docker-compose winbind/EAP E2E (**Samba AD DC + joined FreeRADIUS +
 `eapol_test` supplicant**) that proves *teacher→Access-Accept (+correct VLAN) /
 student-on-teacher-SSID→Access-Reject / wrong-password→Reject / non-`wifi` user→Reject*,
 as well as multischool, update/rollback, and `.deb` install tests — needs real Linux
-with **Docker**. **crabbox** leases an ephemeral Proxmox VM for this (provider in
-`.claude/settings.json`, token only in the gitignored `.claude/settings.local.json`;
-`crabbox doctor`). Rules/details: the `/test` skill (`.claude/skills/test/SKILL.md`).
+with **Docker**. **crabbox** leases an ephemeral Proxmox VM for this (provider settings and
+token only in the gitignored `.claude/settings.local.json`, never in the versioned
+`.claude/settings.json`; `crabbox doctor`). **Not usable at the moment** (2026-09-27): its
+Proxmox user was removed, so the heavy tier does not run until Kevin sets it up again.
+Rules/details: the `/test` skill (`.claude/skills/test/SKILL.md`).
 
 - **One aggregate runner:** `bash scripts/tests/run.sh [gate|lint|unit|quick|locks|e2e|all]`
   (created in P0/P1). Every mode but `e2e` runs the lock gate first (network needed); if it
   fails, run.sh stops there and runs nothing else. `quick` (default) = gate + lint + unit +
   the lock regression test; `e2e`/`all` run the
   Docker suites and **refuse without `LMNRADIUS_ALLOW_REAL=1`**. Summary:
-  `N passed, M failed, K skipped` (exit ≠ 0 on failure); steps dep-gated.
+  `N passed, M failed, K skipped`, then everything that was not checked (skipped, or not run
+  after a failed gate); steps dep-gated. Exit 0 only if every step ran and passed, 1 on a
+  failure, **77 if a step was skipped** (a missing tool, e2e without `LMNRADIUS_ALLOW_REAL=1`);
+  `LMNRADIUS_ALLOW_SKIP=1` accepts skips on purpose (exit 0, the last line still names them).
 - **Box lifecycle:** `crabbox warmup` → `crabbox run --id <slug> -- 'bash scripts/tests/crabbox_bootstrap.sh'`
   → `crabbox run --id <slug> -- 'LMNRADIUS_ALLOW_REAL=1 bash scripts/tests/run.sh e2e'`
   → `crabbox stop --id <slug>`.

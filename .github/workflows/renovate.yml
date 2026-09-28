@@ -2,9 +2,10 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# DISABLED (Kevin, 2026-09-25): this workflow is turned off in the repository settings until
-# Renovate is re-enabled with a GitHub App; until then no Renovate PRs are opened and pins and
-# locks are raised by hand. The rest of this header describes the workflow once re-enabled.
+# STATE (Kevin, 2026-09-25): this workflow is disabled in every faircomp repo (gh workflow disable,
+# shown as disabled_manually). Nothing below runs and no Renovate pull requests arrive; pinned
+# versions move only in reviewed pull requests raised by hand, until Renovate returns as a
+# GitHub App, which replaces this workflow. The rest of this header describes it when enabled.
 #
 # Self-hosted Renovate — so digest bumps work without depending on the org-level
 # Renovate/Mend GitHub App. Runs weekly and on demand. It opens PRs that bump the
