@@ -453,8 +453,8 @@ jobs:
           # The upgrade path really ran and did not silently no-op. Two independent
           # proofs: dpkg unpacked OVER the installed version, and the service was
           # restarted -- prerm deliberately leaves it running on upgrade, and the only
-          # thing that restarts it is `systemctl try-restart` inside the postinst's
-          # `if [ -n "${2:-}" ]` branch, which exists only when dpkg passes an old version.
+          # thing that restarts it is `deb-systemd-invoke restart` in the postinst, which it
+          # runs instead of `start` only when dpkg passes an old version (`${2:-}`).
           grep -qE 'Unpacking linuxmuster-radius \([^)]+\) over \([^)]+\)' upgrade.log
           # dpkg's own record of the action, independent of apt's wording: exactly this
           # step, from the released version to the built one (a reinstall of an equal version
@@ -530,6 +530,44 @@ jobs:
           sudo apt-get -f install -s | grep -q '0 newly installed'
           test -s /var/lib/dpkg/info/linuxmuster-radius.md5sums
           test -z "$(sudo dpkg --verify linuxmuster-radius)"
+      # Debian's rule from 7.3.6 on: an upgrade keeps a service the admin switched off. Once
+      # more from the published release, which never recorded deb-systemd-helper state (so this
+      # is the preinst's one-time transition), then a second time on top: the recorded state
+      # must hold.
+      # The disabled service is neither started for a moment nor used for the instance update, and
+      # apt shows the one line that says so.
+      - name: A service disabled before the upgrade stays disabled and stopped
+        if: steps.prev.outputs.skip != '1'
+        run: |
+          set -eux
+          set -o pipefail
+          P=linuxmuster-radius
+          U=$P.service
+          STATE=/var/lib/systemd/deb-systemd-helper-enabled/$U.dsh-also
+          sudo apt-get purge -y linuxmuster-radius
+          test ! -e "$STATE"        # purge forgot the state: the release starts from scratch
+          sudo apt-get install -y ./previous/*.deb
+          test "$(systemctl is-enabled $U)" = enabled
+          sudo systemctl disable --now $U
+          test "$(systemctl is-active $U || true)" = inactive
+          for pass in 1 2; do
+            cursor="$(sudo journalctl -q -n 0 --show-cursor | sed -n 's/^-- cursor: //p')"
+            test -n "$cursor"
+            sudo apt-get install -y --reinstall --allow-downgrades ./packages/*.deb 2>&1 \
+              | tee "disabled-$pass.log"
+            grep -E 'Unpacking linuxmuster-radius \([^)]+\) over \([^)]+\)' "disabled-$pass.log"
+            test "$(systemctl is-enabled $U || true)" = disabled
+            test "$(systemctl is-active $U || true)" = inactive
+            test "$(sudo journalctl -q --no-pager --after-cursor="$cursor" -u $U \
+                      | grep -c -F 'Started ' || true)" = 0
+            grep -F "$P: the service is disabled and not running, instances not updated" \
+              "disabled-$pass.log"
+          done
+          test -e "$STATE"          # the transition recorded the admin's decision
+          test -z "$(dpkg --audit)"
+          echo "### disabled before the upgrade: disabled and stopped after two upgrades" \
+            >> "$GITHUB_STEP_SUMMARY"
+
       - name: Journal of the control plane (always, for the record)
         if: always() && steps.prev.outputs.skip != '1'
         run: sudo journalctl -u linuxmuster-radius.service --no-pager | tail -60 || true

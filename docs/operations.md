@@ -23,8 +23,9 @@ systemctl status linuxmuster-radius                    # sollte "active" sein
 ```
 
 Die `postinst` legt den Systembenutzer `lmnradius` an (in der Gruppe `docker`), erzeugt
-ein **zufälliges API-Token** in `/etc/linuxmuster-radius/config.yml` (`0600`) und startet
-den Dienst — gebunden an **`127.0.0.1:8080`**. Verzeichnisse: `secrets_dir`
+ein **zufälliges API-Token** in `/etc/linuxmuster-radius/config.yml` (`0600`), aktiviert und
+startet den Dienst — gebunden an **`127.0.0.1:8080`**; danach bleibt es bei der Entscheidung
+des Admins ([Dienst abgeschaltet lassen](#dienst-abgeschaltet-lassen)). Verzeichnisse: `secrets_dir`
 (`/etc/linuxmuster-radius/secrets`, `0700`), `certs_dir` (`/etc/linuxmuster-radius/certs`,
 `0700`), `instances_dir` (`/var/lib/linuxmuster-radius/instances`, als Git-Repo = Change-Log:
 jedes `create`/`set-ldap-ca`/`rm` ist ein Commit, `sudo -u lmnradius git -C
@@ -42,7 +43,7 @@ ist das Repo nicht zu retten, `.git` beiseite legen und die `postinst` erneut la
 `mv /var/lib/linuxmuster-radius/instances/.git /root/instances-git.kaputt && dpkg-reconfigure
 linuxmuster-radius` (als root). Sie legt ein neues Repo an und übernimmt die vorhandenen
 Datensätze in einem Import-Commit; die alte Historie bleibt im beiseitegelegten Verzeichnis. Der
-Dienst wird dabei neu gestartet (wie bei einem Upgrade).
+Dienst wird dabei neu gestartet (wie bei einem Upgrade; ein abgeschalteter Dienst bleibt aus).
 
 ## Erstinbetriebnahme (einmalig)
 
@@ -178,8 +179,45 @@ Das Update zieht den neuen Digest, ersetzt den Container, wartet auf `healthy` (
 Trust **und** radiusd erreichbar) und **rollt bei Fehler automatisch zurück** — die Schule
 bleibt online. Welcher Digest in Produktion gehört, entscheidet ein **gemergter
 Digest-Bump-PR** (nie Auto-Merge; von Hand, solange Renovate abgeschaltet ist). Bei einem **`.deb`-Upgrade** ruft die `postinst`
-automatisch `update-all` auf (best-effort; Instanzen auf dem Default werden übersprungen,
-die apt-Transaktion scheitert daran nie).
+automatisch `update-all` auf, wenn der Dienst nach dem Upgrade läuft (best-effort; Instanzen auf
+dem Default werden übersprungen, die apt-Transaktion scheitert daran nie). Einen abgeschalteten
+Dienst startet sie dafür nicht ([Dienst abgeschaltet lassen](#dienst-abgeschaltet-lassen)).
+
+## Dienst abgeschaltet lassen
+
+Ab 7.3.6 behandelt das Paket seinen Dienst nach den Debian-Regeln (`deb-systemd-helper` und
+`deb-systemd-invoke`, wie Pakete mit dh_installsystemd): eine Neuinstallation aktiviert und
+startet `linuxmuster-radius`, danach behalten Upgrades, was der Admin entschieden hat.
+
+- **Abschalten und aus lassen:** `systemctl disable --now linuxmuster-radius`. Upgrades,
+  Neuinstallationen derselben Version und `dpkg-reconfigure` lassen ihn abgeschaltet und
+  gestoppt, aktualisieren die Instanzen nicht und schreiben eine Zeile in die apt-Ausgabe:
+  `linuxmuster-radius: the service is disabled and not running, instances not updated; run
+  'lmnradius update-all' after starting it`. `systemctl stop` allein reicht nicht: das nächste
+  Upgrade startet einen aktivierten Dienst wieder.
+- **Die RADIUS-Container sind getrennt:** sie sind Docker-Container (`unless-stopped`) und
+  laufen ohne die Control-Plane weiter. Sollen auch sie aus sein, vorher
+  `lmnradius stop <name>` (braucht den laufenden Dienst).
+- **Wieder einschalten:** `systemctl enable --now linuxmuster-radius`, danach
+  `lmnradius update-all` für die Instanz-Updates, die die Upgrades ausgelassen haben.
+- **Abgeschaltet, läuft aber noch** (`systemctl disable` ohne `--now`): ein Upgrade startet ihn
+  mit dem neuen Code neu und aktualisiert die Instanzen; er bleibt abgeschaltet.
+- **Maskiert** (`systemctl mask`): das Paket lässt ihn in Ruhe.
+- **Entfernen und neu installieren:** `apt remove` stoppt den Dienst nur und behält die
+  Entscheidung; eine Neuinstallation stellt sie wieder her. `apt purge` vergisst sie: die
+  nächste Installation ist eine neue, aktiviert und gestartet. Nach dem Entfernen von 7.3.5 oder
+  älter ist eine Neuinstallation ebenfalls eine neue (diese Versionen haben den Dienst beim
+  Entfernen abgeschaltet).
+- **Das erste Upgrade auf 7.3.6** übernimmt einmalig den Zustand, in dem der Dienst in diesem
+  Moment ist: 7.3.5 und älter haben ihn nicht festgehalten. Aktiviert bleibt aktiviert,
+  abgeschaltet oder maskiert bleibt so. Eine Ausnahme: läuft dieses erste Upgrade ohne
+  laufendes systemd (Image-Bau, chroot), wird ein Dienst ohne Aktivierungs-Link wie bei einer
+  Neuinstallation behandelt und aktiviert, weil 7.3.5 und älter ihn offline nie aktiviert haben.
+  Upgrades mit laufendem systemd und jedes spätere Upgrade lassen einen vom Admin abgeschalteten
+  Dienst aus.
+- **Downgrade auf 7.3.5 oder älter:** diese Version aktiviert und startet den Dienst wieder.
+- **Ohne laufendes systemd** (Image-Bau, chroot) aktiviert eine Neuinstallation den Dienst nur;
+  er startet beim nächsten Boot.
 
 ## Beobachten
 

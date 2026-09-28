@@ -7,6 +7,11 @@ if [ -d /run/systemd/system ]; then
 fi
 # Deliberately do NOT delete config/state + venv on remove (only on purge).
 if [ "$1" = "purge" ]; then
+    # The admin's enable/disable decision survives a remove (the prerm only stops the service)
+    # and is forgotten here, as debhelper 13.14's dh_installsystemd snippet does it (no mask on
+    # remove, no unmask on purge since debhelper 13.10). deb-systemd-helper comes with
+    # init-system-helpers, which is Essential.
+    deb-systemd-helper purge linuxmuster-radius.service >/dev/null || true
     rm -rf /opt/linuxmuster-radius
     rm -rf /etc/linuxmuster-radius /var/lib/linuxmuster-radius
 fi

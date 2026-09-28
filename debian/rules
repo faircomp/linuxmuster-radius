@@ -40,7 +40,8 @@ override_dh_auto_clean:
 override_dh_strip override_dh_dwz override_dh_strip_nondeterminism override_dh_makeshlibs:
 	@:
 
-# The maintainer scripts handle the units by hand, unchanged since 7.3.x (the plan, §4).
+# The maintainer scripts handle the unit by hand, with deb-systemd-helper and deb-systemd-invoke
+# as dh_installsystemd's snippets do, because the unit stays in /lib/systemd/system.
 override_dh_installsystemd:
 	@:
 
