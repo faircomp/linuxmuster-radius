@@ -210,7 +210,11 @@ startet `linuxmuster-radius`, danach behalten Upgrades, was der Admin entschiede
   Entfernen abgeschaltet).
 - **Das erste Upgrade auf 7.3.6** übernimmt einmalig den Zustand, in dem der Dienst in diesem
   Moment ist: 7.3.5 und älter haben ihn nicht festgehalten. Aktiviert bleibt aktiviert,
-  abgeschaltet oder maskiert bleibt so.
+  abgeschaltet oder maskiert bleibt so. Eine Ausnahme: läuft dieses erste Upgrade ohne
+  laufendes systemd (Image-Bau, chroot), wird ein Dienst ohne Aktivierungs-Link wie bei einer
+  Neuinstallation behandelt und aktiviert, weil 7.3.5 und älter ihn offline nie aktiviert haben.
+  Upgrades mit laufendem systemd und jedes spätere Upgrade lassen einen vom Admin abgeschalteten
+  Dienst aus.
 - **Downgrade auf 7.3.5 oder älter:** diese Version aktiviert und startet den Dienst wieder.
 - **Ohne laufendes systemd** (Image-Bau, chroot) aktiviert eine Neuinstallation den Dienst nur;
   er startet beim nächsten Boot.

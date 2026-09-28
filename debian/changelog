@@ -2,8 +2,9 @@ linuxmuster-radius (7.3.6) lmn73; urgency=medium
 
   * Upgrades respect a service the admin switched off. Up to 7.3.5 every
     install, upgrade and dpkg-reconfigure enabled and started
-    linuxmuster-radius.service again, and updated the RADIUS instances
-    through it (lmnradius update-all).
+    linuxmuster-radius.service again, and every upgrade (and
+    dpkg-reconfigure) updated the RADIUS instances through it
+    (lmnradius update-all).
     The package now follows Debian's rules (deb-systemd-helper and
     deb-systemd-invoke, as packages built with dh_installsystemd do): a new
     installation enables and starts the service; after that, upgrades keep
@@ -17,6 +18,11 @@ linuxmuster-radius (7.3.6) lmn73; urgency=medium
   * The first upgrade to 7.3.6 takes over the state the service is in at
     that moment (the new preinst records it once), because 7.3.5 and older
     kept no record of it: a service that is disabled then stays disabled.
+    One exception: if this first upgrade runs without a running systemd
+    (an image build, a chroot), a service without an enable link is
+    treated like a new installation and enabled, because 7.3.5 and older
+    never enabled it offline. Upgrades with systemd running, and every
+    later upgrade, keep a service the admin disabled off.
   * Removing the package now only stops the service; it is no longer
     disabled. The decision is kept while the package is removed and applies
     again when it is reinstalled; purge forgets it. Reinstalling after
